@@ -22,15 +22,15 @@ OUT="${2:-$DIR/$BASE.prg}"
 ASM="$DIR/$BASE.asm"
 
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
-CC64="$SCRIPT_DIR/cc64"
-C64ASM="$SCRIPT_DIR/c64asm"
+CC64="$SCRIPT_DIR/bin/cc64"
+C64ASM="$SCRIPT_DIR/bin/c64asm"
 [ -x "$CC64" ] || CC64=cc64
 [ -x "$C64ASM" ] || C64ASM=c64asm
 
 echo "==> compiling $SRC -> $ASM"
-"$CC64" "$SRC" -o "$ASM"
+"$CC64" tests/"$SRC" -o tests/"$ASM"
 
 echo "==> assembling $ASM -> $OUT"
-"$C64ASM" "$ASM" -o "$OUT"
+"$C64ASM" tests/"$ASM" -o tests/"$OUT"
 
 echo "==> done: $OUT"
