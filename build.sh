@@ -5,8 +5,9 @@
 #
 # Chains cc64 (C -> assembly) and c64asm (assembly -> .prg) so you don't
 # have to invoke them separately. Requires both binaries to be built
-# already (cc -std=c99 -O2 -o cc64 cc64.c / cc -std=c99 -O2 -o c64asm c64asm.c),
-# and expects them to be in the same directory as this script (or on PATH).
+# already (`make` builds cc64 from src/*.c; cc -std=c99 -O2 -o c64asm
+# c64asm.c builds the assembler), and expects them to be in the same
+# directory as this script (or on PATH).
 
 set -e
 
@@ -15,22 +16,22 @@ if [ -z "$1" ]; then
     exit 1
 fi
 
-SRC="$1"
+SRC="./tests/$1"
 BASE=$(basename "$SRC" .c)
 DIR=$(dirname "$SRC")
 OUT="${2:-$DIR/$BASE.prg}"
 ASM="$DIR/$BASE.asm"
 
-SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
-CC64="$SCRIPT_DIR/bin/cc64"
-C64ASM="$SCRIPT_DIR/bin/c64asm"
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)/bin
+CC64="$SCRIPT_DIR/cc64"
+C64ASM="$SCRIPT_DIR/c64asm"
 [ -x "$CC64" ] || CC64=cc64
 [ -x "$C64ASM" ] || C64ASM=c64asm
 
 echo "==> compiling $SRC -> $ASM"
-"$CC64" tests/"$SRC" -o tests/"$ASM"
+"$CC64" "$SRC" -o "$ASM"
 
 echo "==> assembling $ASM -> $OUT"
-"$C64ASM" tests/"$ASM" -o tests/"$OUT"
+"$C64ASM" "$ASM" -o "$OUT"
 
 echo "==> done: $OUT"

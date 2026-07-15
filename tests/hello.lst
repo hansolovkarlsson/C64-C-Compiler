@@ -1,394 +1,423 @@
-; c64asm listing  (origin $0801, 1204 bytes)
+; c64asm listing  (origin $0801, 1012 bytes)
 
 080D  A9 0E         LDA #14           ; switch to the lower/upper character set - required
 080F  20 D2 FF      JSR __CHROUT      ; for the PETSCII case mapping below to render as letters
-0812  A9 B5         LDA #<__rt_stack
-0814  85 02         STA __zpSP
-0816  A9 0A         LDA #>__rt_stack
-0818  85 03         STA __zpSP+1
-081A  20 F6 09      JSR __fn_main
-081D  60            RTS
-081E  A0 00         LDY #0
-0820  A5 FB         LDA __zpR
-0822  91 02         STA (__zpSP),Y
-0824  C8            INY
-0825  A5 FC         LDA __zpR+1
-0827  91 02         STA (__zpSP),Y
-0829  18            CLC
-082A  A5 02         LDA __zpSP
-082C  69 02         ADC #2
-082E  85 02         STA __zpSP
-0830  A5 03         LDA __zpSP+1
-0832  69 00         ADC #0
-0834  85 03         STA __zpSP+1
-0836  60            RTS
-0837  38            SEC
-0838  A5 02         LDA __zpSP
-083A  E9 02         SBC #2
-083C  85 02         STA __zpSP
-083E  A5 03         LDA __zpSP+1
-0840  E9 00         SBC #0
-0842  85 03         STA __zpSP+1
-0844  A0 00         LDY #0
-0846  B1 02         LDA (__zpSP),Y
-0848  85 FD         STA __zpR2
-084A  C8            INY
-084B  B1 02         LDA (__zpSP),Y
-084D  85 FE         STA __zpR2+1
-084F  60            RTS
-0850  A9 00         LDA #0
-0852  85 F9         STA __zpT0
-0854  85 FA         STA __zpT0+1
-0856  A2 10         LDX #16
-0858  46 FC         LSR __zpR+1
-085A  66 FB         ROR __zpR
-085C  90 0D         BCC __rt_mul16_noadd
-085E  18            CLC
-085F  A5 F9         LDA __zpT0
-0861  65 FD         ADC __zpR2
-0863  85 F9         STA __zpT0
-0865  A5 FA         LDA __zpT0+1
-0867  65 FE         ADC __zpR2+1
-0869  85 FA         STA __zpT0+1
-086B  06 FD         ASL __zpR2
-086D  26 FE         ROL __zpR2+1
-086F  CA            DEX
-0870  D0 E6         BNE __rt_mul16_loop
-0872  A5 F9         LDA __zpT0
-0874  85 FB         STA __zpR
-0876  A5 FA         LDA __zpT0+1
+0812  A9 00         LDA #0
+0814  8D 1B 08      STA __rt_spidx
+0817  20 AA 0A      JSR __fn_main
+081A  60            RTS
+0822  AE 1B 08      LDX __rt_spidx
+0825  A5 FB         LDA __zpR
+0827  9D F5 0A      STA __rt_stack,X
+082A  A5 FC         LDA __zpR+1
+082C  9D F6 0A      STA __rt_stack+1,X
+082F  E8            INX
+0830  E8            INX
+0831  8E 1B 08      STX __rt_spidx
+0834  60            RTS
+0835  AE 1B 08      LDX __rt_spidx
+0838  CA            DEX
+0839  CA            DEX
+083A  BD F5 0A      LDA __rt_stack,X
+083D  85 FD         STA __zpR2
+083F  BD F6 0A      LDA __rt_stack+1,X
+0842  85 FE         STA __zpR2+1
+0844  8E 1B 08      STX __rt_spidx
+0847  60            RTS
+0848  A9 00         LDA #0
+084A  8D 20 08      STA __zpT0
+084D  8D 21 08      STA __zpT0+1
+0850  A2 10         LDX #16
+0852  46 FC         LSR __zpR+1
+0854  66 FB         ROR __zpR
+0856  90 11         BCC __rt_mul16_noadd
+0858  18            CLC
+0859  AD 20 08      LDA __zpT0
+085C  65 FD         ADC __zpR2
+085E  8D 20 08      STA __zpT0
+0861  AD 21 08      LDA __zpT0+1
+0864  65 FE         ADC __zpR2+1
+0866  8D 21 08      STA __zpT0+1
+0869  06 FD         ASL __zpR2
+086B  26 FE         ROL __zpR2+1
+086D  CA            DEX
+086E  D0 E2         BNE __rt_mul16_loop
+0870  AD 20 08      LDA __zpT0
+0873  85 FB         STA __zpR
+0875  AD 21 08      LDA __zpT0+1
 0878  85 FC         STA __zpR+1
 087A  60            RTS
 087B  A9 00         LDA #0
-087D  85 F9         STA __zpT0
-087F  85 FA         STA __zpT0+1
-0881  A2 10         LDX #16
-0883  06 FD         ASL __zpR2
-0885  26 FE         ROL __zpR2+1
-0887  26 F9         ROL __zpT0
-0889  26 FA         ROL __zpT0+1
-088B  A5 F9         LDA __zpT0
-088D  38            SEC
-088E  E5 FB         SBC __zpR
-0890  A8            TAY
-0891  A5 FA         LDA __zpT0+1
-0893  E5 FC         SBC __zpR+1
-0895  90 06         BCC __rt_udiv16_skip
-0897  85 FA         STA __zpT0+1
-0899  84 F9         STY __zpT0
-089B  E6 FD         INC __zpR2
-089D  CA            DEX
-089E  D0 E3         BNE __rt_udiv16_loop
-08A0  60            RTS
-08A1  38            SEC
-08A2  A9 00         LDA #0
-08A4  E5 FD         SBC __zpR2
-08A6  AA            TAX
-08A7  A9 00         LDA #0
-08A9  E5 FE         SBC __zpR2+1
-08AB  85 FE         STA __zpR2+1
-08AD  86 FD         STX __zpR2
-08AF  60            RTS
-08B0  38            SEC
-08B1  A9 00         LDA #0
-08B3  E5 FB         SBC __zpR
-08B5  AA            TAX
-08B6  A9 00         LDA #0
-08B8  E5 FC         SBC __zpR+1
-08BA  85 FC         STA __zpR+1
-08BC  86 FB         STX __zpR
-08BE  60            RTS
-08BF  38            SEC
-08C0  A9 00         LDA #0
-08C2  E5 F9         SBC __zpT0
-08C4  AA            TAX
-08C5  A9 00         LDA #0
-08C7  E5 FA         SBC __zpT0+1
-08C9  85 FA         STA __zpT0+1
-08CB  86 F9         STX __zpT0
-08CD  60            RTS
+087D  8D 20 08      STA __zpT0
+0880  8D 21 08      STA __zpT0+1
+0883  A2 10         LDX #16
+0885  06 FD         ASL __zpR2
+0887  26 FE         ROL __zpR2+1
+0889  2E 20 08      ROL __zpT0
+088C  2E 21 08      ROL __zpT0+1
+088F  AD 20 08      LDA __zpT0
+0892  38            SEC
+0893  E5 FB         SBC __zpR
+0895  A8            TAY
+0896  AD 21 08      LDA __zpT0+1
+0899  E5 FC         SBC __zpR+1
+089B  90 08         BCC __rt_udiv16_skip
+089D  8D 21 08      STA __zpT0+1
+08A0  8C 20 08      STY __zpT0
+08A3  E6 FD         INC __zpR2
+08A5  CA            DEX
+08A6  D0 DD         BNE __rt_udiv16_loop
+08A8  60            RTS
+08A9  38            SEC
+08AA  A9 00         LDA #0
+08AC  E5 FD         SBC __zpR2
+08AE  AA            TAX
+08AF  A9 00         LDA #0
+08B1  E5 FE         SBC __zpR2+1
+08B3  85 FE         STA __zpR2+1
+08B5  86 FD         STX __zpR2
+08B7  60            RTS
+08B8  38            SEC
+08B9  A9 00         LDA #0
+08BB  E5 FB         SBC __zpR
+08BD  AA            TAX
+08BE  A9 00         LDA #0
+08C0  E5 FC         SBC __zpR+1
+08C2  85 FC         STA __zpR+1
+08C4  86 FB         STX __zpR
+08C6  60            RTS
+08C7  38            SEC
+08C8  A9 00         LDA #0
+08CA  ED 20 08      SBC __zpT0
+08CD  AA            TAX
 08CE  A9 00         LDA #0
-08D0  85 F7         STA __zpT1
-08D2  85 F8         STA __zpT1+1
-08D4  A5 FE         LDA __zpR2+1
-08D6  10 05         BPL __rt_sdm_d1
-08D8  20 A1 08      JSR __rt_neg_r2
-08DB  E6 F7         INC __zpT1
-08DD  A5 FC         LDA __zpR+1
-08DF  10 05         BPL __rt_sdm_d2
-08E1  20 B0 08      JSR __rt_neg_r
-08E4  E6 F8         INC __zpT1+1
-08E6  20 7B 08      JSR __rt_udiv16
-08E9  A5 F7         LDA __zpT1
-08EB  45 F8         EOR __zpT1+1
-08ED  29 01         AND #1
-08EF  F0 03         BEQ __rt_sdm_qdone
-08F1  20 A1 08      JSR __rt_neg_r2
-08F4  A5 F7         LDA __zpT1
-08F6  F0 03         BEQ __rt_sdm_rdone
-08F8  20 BF 08      JSR __rt_neg_t0
-08FB  60            RTS
-08FC  A5 FD         LDA __zpR2
-08FE  C5 FB         CMP __zpR
-0900  D0 0F         BNE __rt_eq16_ne
-0902  A5 FE         LDA __zpR2+1
-0904  C5 FC         CMP __zpR+1
-0906  D0 09         BNE __rt_eq16_ne
-0908  A9 01         LDA #1
-090A  85 FB         STA __zpR
-090C  A9 00         LDA #0
-090E  85 FC         STA __zpR+1
-0910  60            RTS
-0911  A9 00         LDA #0
-0913  85 FB         STA __zpR
-0915  85 FC         STA __zpR+1
-0917  60            RTS
-0918  A5 FD         LDA __zpR2
-091A  C5 FB         CMP __zpR
-091C  D0 0D         BNE __rt_ne16_ne
-091E  A5 FE         LDA __zpR2+1
-0920  C5 FC         CMP __zpR+1
-0922  D0 07         BNE __rt_ne16_ne
+08D0  ED 21 08      SBC __zpT0+1
+08D3  8D 21 08      STA __zpT0+1
+08D6  8E 20 08      STX __zpT0
+08D9  60            RTS
+08DA  A9 00         LDA #0
+08DC  8D 1E 08      STA __zpT1
+08DF  8D 1F 08      STA __zpT1+1
+08E2  A5 FE         LDA __zpR2+1
+08E4  10 06         BPL __rt_sdm_d1
+08E6  20 A9 08      JSR __rt_neg_r2
+08E9  EE 1E 08      INC __zpT1
+08EC  A5 FC         LDA __zpR+1
+08EE  10 06         BPL __rt_sdm_d2
+08F0  20 B8 08      JSR __rt_neg_r
+08F3  EE 1F 08      INC __zpT1+1
+08F6  20 7B 08      JSR __rt_udiv16
+08F9  AD 1E 08      LDA __zpT1
+08FC  4D 1F 08      EOR __zpT1+1
+08FF  29 01         AND #1
+0901  F0 03         BEQ __rt_sdm_qdone
+0903  20 A9 08      JSR __rt_neg_r2
+0906  AD 1E 08      LDA __zpT1
+0909  F0 03         BEQ __rt_sdm_rdone
+090B  20 C7 08      JSR __rt_neg_t0
+090E  60            RTS
+090F  A5 FD         LDA __zpR2
+0911  C5 FB         CMP __zpR
+0913  D0 0F         BNE __rt_eq16_ne
+0915  A5 FE         LDA __zpR2+1
+0917  C5 FC         CMP __zpR+1
+0919  D0 09         BNE __rt_eq16_ne
+091B  A9 01         LDA #1
+091D  85 FB         STA __zpR
+091F  A9 00         LDA #0
+0921  85 FC         STA __zpR+1
+0923  60            RTS
 0924  A9 00         LDA #0
 0926  85 FB         STA __zpR
 0928  85 FC         STA __zpR+1
 092A  60            RTS
-092B  A9 01         LDA #1
-092D  85 FB         STA __zpR
-092F  A9 00         LDA #0
-0931  85 FC         STA __zpR+1
-0933  60            RTS
-0934  38            SEC
-0935  A5 FD         LDA __zpR2
-0937  E5 FB         SBC __zpR
-0939  A5 FE         LDA __zpR2+1
-093B  E5 FC         SBC __zpR+1
-093D  50 02         BVC __rt_sub_r2r_ok
-093F  49 80         EOR #$80
-0941  60            RTS
-0942  38            SEC
-0943  A5 FB         LDA __zpR
-0945  E5 FD         SBC __zpR2
-0947  A5 FC         LDA __zpR+1
-0949  E5 FE         SBC __zpR2+1
-094B  50 02         BVC __rt_sub_rr2_ok
-094D  49 80         EOR #$80
-094F  60            RTS
-0950  20 34 09      JSR __rt_sub_r2r
-0953  30 07         BMI __rt_lt16_t
-0955  A9 00         LDA #0
-0957  85 FB         STA __zpR
-0959  85 FC         STA __zpR+1
-095B  60            RTS
-095C  A9 01         LDA #1
-095E  85 FB         STA __zpR
-0960  A9 00         LDA #0
-0962  85 FC         STA __zpR+1
-0964  60            RTS
-0965  20 34 09      JSR __rt_sub_r2r
-0968  10 07         BPL __rt_ge16_t
-096A  A9 00         LDA #0
-096C  85 FB         STA __zpR
-096E  85 FC         STA __zpR+1
-0970  60            RTS
-0971  A9 01         LDA #1
-0973  85 FB         STA __zpR
-0975  A9 00         LDA #0
-0977  85 FC         STA __zpR+1
-0979  60            RTS
-097A  20 42 09      JSR __rt_sub_rr2
-097D  30 07         BMI __rt_gt16_t
-097F  A9 00         LDA #0
-0981  85 FB         STA __zpR
-0983  85 FC         STA __zpR+1
-0985  60            RTS
-0986  A9 01         LDA #1
-0988  85 FB         STA __zpR
-098A  A9 00         LDA #0
-098C  85 FC         STA __zpR+1
-098E  60            RTS
-098F  20 42 09      JSR __rt_sub_rr2
-0992  10 07         BPL __rt_le16_t
-0994  A9 00         LDA #0
-0996  85 FB         STA __zpR
-0998  85 FC         STA __zpR+1
-099A  60            RTS
-099B  A9 01         LDA #1
-099D  85 FB         STA __zpR
-099F  A9 00         LDA #0
-09A1  85 FC         STA __zpR+1
-09A3  60            RTS
-09A4  A6 FB         LDX __zpR
-09A6  A5 FD         LDA __zpR2
-09A8  85 FB         STA __zpR
-09AA  A5 FE         LDA __zpR2+1
-09AC  85 FC         STA __zpR+1
-09AE  E0 00         CPX #0
-09B0  F0 08         BEQ __rt_shl16_done
-09B2  06 FB         ASL __zpR
-09B4  26 FC         ROL __zpR+1
-09B6  CA            DEX
-09B7  4C AE 09      JMP __rt_shl16_loop
-09BA  60            RTS
-09BB  A6 FB         LDX __zpR
-09BD  A5 FD         LDA __zpR2
-09BF  85 FB         STA __zpR
-09C1  A5 FE         LDA __zpR2+1
-09C3  85 FC         STA __zpR+1
-09C5  E0 00         CPX #0
-09C7  F0 0C         BEQ __rt_shr16_done
-09C9  A5 FC         LDA __zpR+1
-09CB  C9 80         CMP #$80
-09CD  66 FC         ROR __zpR+1
-09CF  66 FB         ROR __zpR
-09D1  CA            DEX
-09D2  4C C5 09      JMP __rt_shr16_loop
-09D5  60            RTS
-09D6  A5 FB         LDA __zpR
-09D8  C9 61         CMP #$61
-09DA  90 0C         BCC __rt_tp_notlower
-09DC  C9 7B         CMP #$7B
-09DE  B0 08         BCS __rt_tp_notlower
-09E0  38            SEC
-09E1  E9 20         SBC #$20
-09E3  85 FB         STA __zpR
-09E5  4C F5 09      JMP __rt_tp_done
-09E8  C9 41         CMP #$41
-09EA  90 09         BCC __rt_tp_done
-09EC  C9 5B         CMP #$5B
-09EE  B0 05         BCS __rt_tp_done
-09F0  18            CLC
-09F1  69 80         ADC #$80
-09F3  85 FB         STA __zpR
-09F5  60            RTS
-09F6  A9 C8         LDA #$C8
-09F8  20 D2 FF      JSR __CHROUT
-09FB  A9 C5         LDA #$C5
-09FD  20 D2 FF      JSR __CHROUT
-0A00  A9 CC         LDA #$CC
-0A02  20 D2 FF      JSR __CHROUT
-0A05  A9 CC         LDA #$CC
-0A07  20 D2 FF      JSR __CHROUT
-0A0A  A9 CF         LDA #$CF
-0A0C  20 D2 FF      JSR __CHROUT
-0A0F  A9 2C         LDA #$2C
-0A11  20 D2 FF      JSR __CHROUT
-0A14  A9 20         LDA #$20
-0A16  20 D2 FF      JSR __CHROUT
-0A19  A9 D7         LDA #$D7
-0A1B  20 D2 FF      JSR __CHROUT
-0A1E  A9 CF         LDA #$CF
-0A20  20 D2 FF      JSR __CHROUT
-0A23  A9 D2         LDA #$D2
-0A25  20 D2 FF      JSR __CHROUT
-0A28  A9 CC         LDA #$CC
-0A2A  20 D2 FF      JSR __CHROUT
-0A2D  A9 C4         LDA #$C4
-0A2F  20 D2 FF      JSR __CHROUT
-0A32  A9 21         LDA #$21
-0A34  20 D2 FF      JSR __CHROUT
-0A37  A5 FB         LDA __zpR
-0A39  A9 0D         LDA #<13
-0A3B  85 FB         STA __zpR
-0A3D  A9 00         LDA #>13
-0A3F  85 FC         STA __zpR+1
-0A41  20 D6 09      JSR __rt_topetscii
-0A44  A5 FB         LDA __zpR
-0A46  20 D2 FF      JSR __CHROUT
-0A49  A9 C6         LDA #$C6
-0A4B  20 D2 FF      JSR __CHROUT
-0A4E  A9 D2         LDA #$D2
-0A50  20 D2 FF      JSR __CHROUT
-0A53  A9 CF         LDA #$CF
-0A55  20 D2 FF      JSR __CHROUT
-0A58  A9 CD         LDA #$CD
-0A5A  20 D2 FF      JSR __CHROUT
-0A5D  A9 20         LDA #$20
-0A5F  20 D2 FF      JSR __CHROUT
-0A62  A9 C3         LDA #$C3
-0A64  20 D2 FF      JSR __CHROUT
-0A67  A9 C3         LDA #$C3
-0A69  20 D2 FF      JSR __CHROUT
-0A6C  A9 36         LDA #$36
-0A6E  20 D2 FF      JSR __CHROUT
-0A71  A9 34         LDA #$34
-0A73  20 D2 FF      JSR __CHROUT
-0A76  A9 20         LDA #$20
-0A78  20 D2 FF      JSR __CHROUT
-0A7B  A9 CF         LDA #$CF
-0A7D  20 D2 FF      JSR __CHROUT
-0A80  A9 CE         LDA #$CE
-0A82  20 D2 FF      JSR __CHROUT
-0A85  A9 20         LDA #$20
-0A87  20 D2 FF      JSR __CHROUT
-0A8A  A9 D4         LDA #$D4
-0A8C  20 D2 FF      JSR __CHROUT
-0A8F  A9 C8         LDA #$C8
-0A91  20 D2 FF      JSR __CHROUT
-0A94  A9 C5         LDA #$C5
+092B  A5 FD         LDA __zpR2
+092D  C5 FB         CMP __zpR
+092F  D0 0D         BNE __rt_ne16_ne
+0931  A5 FE         LDA __zpR2+1
+0933  C5 FC         CMP __zpR+1
+0935  D0 07         BNE __rt_ne16_ne
+0937  A9 00         LDA #0
+0939  85 FB         STA __zpR
+093B  85 FC         STA __zpR+1
+093D  60            RTS
+093E  A9 01         LDA #1
+0940  85 FB         STA __zpR
+0942  A9 00         LDA #0
+0944  85 FC         STA __zpR+1
+0946  60            RTS
+0947  38            SEC
+0948  A5 FD         LDA __zpR2
+094A  E5 FB         SBC __zpR
+094C  A5 FE         LDA __zpR2+1
+094E  E5 FC         SBC __zpR+1
+0950  50 02         BVC __rt_sub_r2r_ok
+0952  49 80         EOR #$80
+0954  60            RTS
+0955  38            SEC
+0956  A5 FB         LDA __zpR
+0958  E5 FD         SBC __zpR2
+095A  A5 FC         LDA __zpR+1
+095C  E5 FE         SBC __zpR2+1
+095E  50 02         BVC __rt_sub_rr2_ok
+0960  49 80         EOR #$80
+0962  60            RTS
+0963  20 47 09      JSR __rt_sub_r2r
+0966  30 07         BMI __rt_lt16_t
+0968  A9 00         LDA #0
+096A  85 FB         STA __zpR
+096C  85 FC         STA __zpR+1
+096E  60            RTS
+096F  A9 01         LDA #1
+0971  85 FB         STA __zpR
+0973  A9 00         LDA #0
+0975  85 FC         STA __zpR+1
+0977  60            RTS
+0978  20 47 09      JSR __rt_sub_r2r
+097B  10 07         BPL __rt_ge16_t
+097D  A9 00         LDA #0
+097F  85 FB         STA __zpR
+0981  85 FC         STA __zpR+1
+0983  60            RTS
+0984  A9 01         LDA #1
+0986  85 FB         STA __zpR
+0988  A9 00         LDA #0
+098A  85 FC         STA __zpR+1
+098C  60            RTS
+098D  20 55 09      JSR __rt_sub_rr2
+0990  30 07         BMI __rt_gt16_t
+0992  A9 00         LDA #0
+0994  85 FB         STA __zpR
+0996  85 FC         STA __zpR+1
+0998  60            RTS
+0999  A9 01         LDA #1
+099B  85 FB         STA __zpR
+099D  A9 00         LDA #0
+099F  85 FC         STA __zpR+1
+09A1  60            RTS
+09A2  20 55 09      JSR __rt_sub_rr2
+09A5  10 07         BPL __rt_le16_t
+09A7  A9 00         LDA #0
+09A9  85 FB         STA __zpR
+09AB  85 FC         STA __zpR+1
+09AD  60            RTS
+09AE  A9 01         LDA #1
+09B0  85 FB         STA __zpR
+09B2  A9 00         LDA #0
+09B4  85 FC         STA __zpR+1
+09B6  60            RTS
+09B7  A6 FB         LDX __zpR
+09B9  A5 FD         LDA __zpR2
+09BB  85 FB         STA __zpR
+09BD  A5 FE         LDA __zpR2+1
+09BF  85 FC         STA __zpR+1
+09C1  E0 00         CPX #0
+09C3  F0 08         BEQ __rt_shl16_done
+09C5  06 FB         ASL __zpR
+09C7  26 FC         ROL __zpR+1
+09C9  CA            DEX
+09CA  4C C1 09      JMP __rt_shl16_loop
+09CD  60            RTS
+09CE  A6 FB         LDX __zpR
+09D0  A5 FD         LDA __zpR2
+09D2  85 FB         STA __zpR
+09D4  A5 FE         LDA __zpR2+1
+09D6  85 FC         STA __zpR+1
+09D8  E0 00         CPX #0
+09DA  F0 0C         BEQ __rt_shr16_done
+09DC  A5 FC         LDA __zpR+1
+09DE  C9 80         CMP #$80
+09E0  66 FC         ROR __zpR+1
+09E2  66 FB         ROR __zpR
+09E4  CA            DEX
+09E5  4C D8 09      JMP __rt_shr16_loop
+09E8  60            RTS
+09E9  A5 FB         LDA __zpR
+09EB  C9 61         CMP #$61
+09ED  90 0C         BCC __rt_tp_notlower
+09EF  C9 7B         CMP #$7B
+09F1  B0 08         BCS __rt_tp_notlower
+09F3  38            SEC
+09F4  E9 20         SBC #$20
+09F6  85 FB         STA __zpR
+09F8  4C 08 0A      JMP __rt_tp_done
+09FB  C9 41         CMP #$41
+09FD  90 09         BCC __rt_tp_done
+09FF  C9 5B         CMP #$5B
+0A01  B0 05         BCS __rt_tp_done
+0A03  18            CLC
+0A04  69 80         ADC #$80
+0A06  85 FB         STA __zpR
+0A08  60            RTS
+0A09  A5 FE         LDA __zpR2+1
+0A0B  C5 FC         CMP __zpR+1
+0A0D  90 0F         BCC __rt_ult16_t
+0A0F  D0 06         BNE __rt_ult16_f
+0A11  A5 FD         LDA __zpR2
+0A13  C5 FB         CMP __zpR
+0A15  90 07         BCC __rt_ult16_t
+0A17  A9 00         LDA #0
+0A19  85 FB         STA __zpR
+0A1B  85 FC         STA __zpR+1
+0A1D  60            RTS
+0A1E  A9 01         LDA #1
+0A20  85 FB         STA __zpR
+0A22  A9 00         LDA #0
+0A24  85 FC         STA __zpR+1
+0A26  60            RTS
+0A27  A5 FC         LDA __zpR+1
+0A29  C5 FE         CMP __zpR2+1
+0A2B  90 0F         BCC __rt_ugt16_t
+0A2D  D0 06         BNE __rt_ugt16_f
+0A2F  A5 FB         LDA __zpR
+0A31  C5 FD         CMP __zpR2
+0A33  90 07         BCC __rt_ugt16_t
+0A35  A9 00         LDA #0
+0A37  85 FB         STA __zpR
+0A39  85 FC         STA __zpR+1
+0A3B  60            RTS
+0A3C  A9 01         LDA #1
+0A3E  85 FB         STA __zpR
+0A40  A9 00         LDA #0
+0A42  85 FC         STA __zpR+1
+0A44  60            RTS
+0A45  A5 FC         LDA __zpR+1
+0A47  C5 FE         CMP __zpR2+1
+0A49  90 11         BCC __rt_ule16_f
+0A4B  D0 06         BNE __rt_ule16_t
+0A4D  A5 FB         LDA __zpR
+0A4F  C5 FD         CMP __zpR2
+0A51  90 09         BCC __rt_ule16_f
+0A53  A9 01         LDA #1
+0A55  85 FB         STA __zpR
+0A57  A9 00         LDA #0
+0A59  85 FC         STA __zpR+1
+0A5B  60            RTS
+0A5C  A9 00         LDA #0
+0A5E  85 FB         STA __zpR
+0A60  85 FC         STA __zpR+1
+0A62  60            RTS
+0A63  A5 FE         LDA __zpR2+1
+0A65  C5 FC         CMP __zpR+1
+0A67  90 11         BCC __rt_uge16_f
+0A69  D0 06         BNE __rt_uge16_t
+0A6B  A5 FD         LDA __zpR2
+0A6D  C5 FB         CMP __zpR
+0A6F  90 09         BCC __rt_uge16_f
+0A71  A9 01         LDA #1
+0A73  85 FB         STA __zpR
+0A75  A9 00         LDA #0
+0A77  85 FC         STA __zpR+1
+0A79  60            RTS
+0A7A  A9 00         LDA #0
+0A7C  85 FB         STA __zpR
+0A7E  85 FC         STA __zpR+1
+0A80  60            RTS
+0A81  A5 FB         LDA __zpR
+0A83  85 02         STA __zpAP
+0A85  A5 FC         LDA __zpR+1
+0A87  85 03         STA __zpAP+1
+0A89  A0 00         LDY #0
+0A8B  B1 02         LDA (__zpAP),Y
+0A8D  F0 1A         BEQ __rt_puts_done
+0A8F  85 FB         STA __zpR
+0A91  20 E9 09      JSR __rt_topetscii
+0A94  A5 FB         LDA __zpR
 0A96  20 D2 FF      JSR __CHROUT
-0A99  A9 20         LDA #$20
-0A9B  20 D2 FF      JSR __CHROUT
-0A9E  A9 C3         LDA #$C3
-0AA0  20 D2 FF      JSR __CHROUT
-0AA3  A9 36         LDA #$36
-0AA5  20 D2 FF      JSR __CHROUT
-0AA8  A9 34         LDA #$34
-0AAA  20 D2 FF      JSR __CHROUT
-0AAD  A9 2E         LDA #$2E
-0AAF  20 D2 FF      JSR __CHROUT
-0AB2  A5 FB         LDA __zpR
-0AB4  60            RTS
+0A99  18            CLC
+0A9A  A5 02         LDA __zpAP
+0A9C  69 01         ADC #1
+0A9E  85 02         STA __zpAP
+0AA0  A5 03         LDA __zpAP+1
+0AA2  69 00         ADC #0
+0AA4  85 03         STA __zpAP+1
+0AA6  4C 89 0A      JMP __rt_puts_loop
+0AA9  60            RTS
+0AAA  A9 D1         LDA #<__str_0
+0AAC  85 FB         STA __zpR
+0AAE  A9 0A         LDA #>__str_0
+0AB0  85 FC         STA __zpR+1
+0AB2  20 81 0A      JSR __rt_puts
+0AB5  A9 0D         LDA #<13
+0AB7  85 FB         STA __zpR
+0AB9  A9 00         LDA #>13
+0ABB  85 FC         STA __zpR+1
+0ABD  20 E9 09      JSR __rt_topetscii
+0AC0  A5 FB         LDA __zpR
+0AC2  20 D2 FF      JSR __CHROUT
+0AC5  A9 DF         LDA #<__str_1
+0AC7  85 FB         STA __zpR
+0AC9  A9 0A         LDA #>__str_1
+0ACB  85 FC         STA __zpR+1
+0ACD  20 81 0A      JSR __rt_puts
+0AD0  60            RTS
 
 Symbol table:
   __CHROUT             = $FFD2
-  __fn_main            = $09F6
-  __rt_eq16            = $08FC
-  __rt_eq16_ne         = $0911
-  __rt_ge16            = $0965
-  __rt_ge16_t          = $0971
-  __rt_gt16            = $097A
-  __rt_gt16_t          = $0986
-  __rt_le16            = $098F
-  __rt_le16_t          = $099B
-  __rt_lt16            = $0950
-  __rt_lt16_t          = $095C
-  __rt_mul16           = $0850
-  __rt_mul16_loop      = $0858
-  __rt_mul16_noadd     = $086B
-  __rt_ne16            = $0918
-  __rt_ne16_ne         = $092B
-  __rt_neg_r           = $08B0
-  __rt_neg_r2          = $08A1
-  __rt_neg_t0          = $08BF
-  __rt_pop2            = $0837
-  __rt_push            = $081E
-  __rt_sdivmod16       = $08CE
-  __rt_sdm_d1          = $08DD
-  __rt_sdm_d2          = $08E6
-  __rt_sdm_qdone       = $08F4
-  __rt_sdm_rdone       = $08FB
-  __rt_shl16           = $09A4
-  __rt_shl16_done      = $09BA
-  __rt_shl16_loop      = $09AE
-  __rt_shr16           = $09BB
-  __rt_shr16_done      = $09D5
-  __rt_shr16_loop      = $09C5
-  __rt_stack           = $0AB5
-  __rt_sub_r2r         = $0934
-  __rt_sub_r2r_ok      = $0941
-  __rt_sub_rr2         = $0942
-  __rt_sub_rr2_ok      = $094F
-  __rt_topetscii       = $09D6
-  __rt_tp_done         = $09F5
-  __rt_tp_notlower     = $09E8
+  __fn_main            = $0AAA
+  __rt_eq16            = $090F
+  __rt_eq16_ne         = $0924
+  __rt_ge16            = $0978
+  __rt_ge16_t          = $0984
+  __rt_gt16            = $098D
+  __rt_gt16_t          = $0999
+  __rt_le16            = $09A2
+  __rt_le16_t          = $09AE
+  __rt_lt16            = $0963
+  __rt_lt16_t          = $096F
+  __rt_mul16           = $0848
+  __rt_mul16_loop      = $0852
+  __rt_mul16_noadd     = $0869
+  __rt_ne16            = $092B
+  __rt_ne16_ne         = $093E
+  __rt_neg_r           = $08B8
+  __rt_neg_r2          = $08A9
+  __rt_neg_t0          = $08C7
+  __rt_pop2            = $0835
+  __rt_push            = $0822
+  __rt_puts            = $0A81
+  __rt_puts_done       = $0AA9
+  __rt_puts_loop       = $0A89
+  __rt_sdivmod16       = $08DA
+  __rt_sdm_d1          = $08EC
+  __rt_sdm_d2          = $08F6
+  __rt_sdm_qdone       = $0906
+  __rt_sdm_rdone       = $090E
+  __rt_shl16           = $09B7
+  __rt_shl16_done      = $09CD
+  __rt_shl16_loop      = $09C1
+  __rt_shr16           = $09CE
+  __rt_shr16_done      = $09E8
+  __rt_shr16_loop      = $09D8
+  __rt_spidx           = $081B
+  __rt_stack           = $0AF5
+  __rt_sub_r2r         = $0947
+  __rt_sub_r2r_ok      = $0954
+  __rt_sub_rr2         = $0955
+  __rt_sub_rr2_ok      = $0962
+  __rt_topetscii       = $09E9
+  __rt_tp_done         = $0A08
+  __rt_tp_notlower     = $09FB
   __rt_udiv16          = $087B
-  __rt_udiv16_loop     = $0883
-  __rt_udiv16_skip     = $089D
-  __zpAP               = $00F3
-  __zpAP2              = $00F5
+  __rt_udiv16_loop     = $0885
+  __rt_udiv16_skip     = $08A5
+  __rt_uge16           = $0A63
+  __rt_uge16_f         = $0A7A
+  __rt_uge16_t         = $0A71
+  __rt_ugt16           = $0A27
+  __rt_ugt16_f         = $0A35
+  __rt_ugt16_t         = $0A3C
+  __rt_ule16           = $0A45
+  __rt_ule16_f         = $0A5C
+  __rt_ule16_t         = $0A53
+  __rt_ult16           = $0A09
+  __rt_ult16_f         = $0A17
+  __rt_ult16_t         = $0A1E
+  __str_0              = $0AD1
+  __str_1              = $0ADF
+  __zpAP               = $0002
+  __zpAP2              = $081C
   __zpR                = $00FB
   __zpR2               = $00FD
-  __zpSP               = $0002
-  __zpT0               = $00F9
-  __zpT1               = $00F7
+  __zpT0               = $0820
+  __zpT1               = $081E

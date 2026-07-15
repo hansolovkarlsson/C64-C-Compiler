@@ -1,21 +1,29 @@
 # cc64 - a minimal C compiler for the Commodore 64
 
 `cc64` compiles a small subset of C directly to 6502 assembly in the
-exact syntax your `c64asm.c` assembler expects. This is step 1 of an
-incremental plan: get a solid, verified minimal subset working first,
-then add features (pointers, recursion, structs, ...) on top of a
-foundation that's already known to generate correct code.
+exact syntax your `c64asm.c` assembler expects. This is built
+incrementally: get a solid, verified minimal subset working first (a
+step-1 "int/char, no pointers" core), then add features (pointers -
+done; recursion, structs, ... - not yet) on top of a foundation
+that's already known to generate correct code.
+
+The source is split into one file per compiler phase under `src/`,
+each with a substantial comment explaining what that phase does and
+why - see "Source layout" below if you're reading this to learn how a
+small compiler like this is put together, not just to use it.
 
 ## Building
 
-Portable C99, no dependencies:
+Portable C99, no dependencies. A Makefile builds `cc64` from `src/*.c`:
 
 ```sh
-cc -std=c99 -O2 -o cc64 cc64.c
+make
 cc -std=c99 -O2 -o c64asm c64asm.c   # your existing assembler
 ```
 
-Both build cleanly with `clang` on Apple Silicon or `gcc`/`cc` on Linux.
+(`make clean` removes the built binary.) Both build cleanly with
+`clang` on Apple Silicon or `gcc`/`cc` on Linux. If you'd rather build
+by hand without the Makefile: `cc -std=c99 -O2 -o cc64 src/*.c`.
 
 ## Using it
 
@@ -32,6 +40,31 @@ or, to do both in one step:
 
 Load `program.prg` in VICE (or a real C64) the normal way; it's built
 with a BASIC `10 SYS ...` loader stub, so `LOAD` then `RUN` works.
+
+## Source layout
+
+Each file below corresponds to one phase you'd recognize from a
+compilers course; `src/cc64.h`'s own header comment gives the same
+map with more detail on how the phases fit together, plus notes on
+the compiler's overall architecture (why everything flows through a
+"register", why there's no call stack, why parsing happens in two
+passes). Reading the files in roughly this order is a reasonable way
+to approach the codebase for the first time:
+
+| File | What it does |
+|---|---|
+| `src/cc64.h` | Shared types and cross-module declarations; start here for the architecture overview |
+| `src/lexer.c` | Source text -> tokens |
+| `src/ast.c` | The AST node constructor |
+| `src/symtab.c` | Symbol tables, plus the minimal type inference used for pointer arithmetic |
+| `src/parser.c` | Recursive-descent parsing (tokens -> AST), and the two-pass driver (`pass_a`/`pass_b`) |
+| `src/recursion.c` | Rejects recursive functions at compile time (call-graph cycle detection) |
+| `src/codegen.c` | Shared codegen utilities: emitting a line of assembly, label generation |
+| `src/codegen_runtime.c` | The fixed 6502 runtime library (multiply, divide, comparisons, string printing) |
+| `src/codegen_expr.c` | Expression codegen - the largest file, where most operators and pointer handling live |
+| `src/codegen_stmt.c` | Statement codegen, plus emitting storage layout for globals and functions |
+| `src/main.c` | The command-line driver tying every phase together |
+
 
 ## What's supported
 
