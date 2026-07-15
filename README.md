@@ -33,20 +33,40 @@ or, to do both in one step:
 Load `program.prg` in VICE (or a real C64) the normal way; it's built
 with a BASIC `10 SYS ...` loader stub, so `LOAD` then `RUN` works.
 
-## What's supported (the "minimal" subset)
+## What's supported
 
 - **Types:** `int` (16-bit, signed), `char` (8-bit, **unsigned** - see
-  below), `void`.
+  below), `void`, and single-level pointers to either (`int *`, `char *`).
 - **Declarations:** globals and locals, with an optional 1-D array
   form (`int a[10];`, `char buf[40];`), and an optional constant
-  literal initializer for scalar globals (`int x = 5;`, `int y = -3;`).
-  Array initializers aren't supported yet (arrays start zero-filled).
-- **Functions:** typed parameters, typed return value, forward calls in
-  any order (any function can call any other regardless of which is
-  defined first in the file - see "Two-pass compilation" below). **No
-  recursion**, direct or indirect - see "Why no recursion" below. The
-  compiler detects and rejects recursive call cycles at compile time
-  with a clear error, rather than letting them silently corrupt data.
+  literal initializer for scalar (non-pointer) globals (`int x = 5;`,
+  `int y = -3;`). Array initializers and pointer initializers on
+  *globals* aren't supported yet (arrays start zero-filled; give a
+  pointer its value inside a function instead). Local pointer
+  declarations *can* have an initializer, including a string literal
+  (`char *s = "hi";`).
+- **Functions:** typed parameters (including pointer parameters),
+  typed return value (including pointer return types), forward calls
+  in any order (any function can call any other regardless of which
+  is defined first in the file - see "Two-pass compilation" below).
+  **No recursion**, direct or indirect - see "Why no recursion" below.
+  The compiler detects and rejects recursive call cycles at compile
+  time with a clear error, rather than letting them silently corrupt
+  data.
+- **Pointers:** `&x` (address-of - works on scalars and array
+  elements; safe on locals too, since there's no call stack for them
+  to dangle from), `*p` (dereference, usable as both an rvalue and an
+  assignment target, including `*p += n`, `(*p)++`, etc.), `p[i]`
+  indexing through a pointer (not just through a true array),
+  pointer arithmetic (`p + n`, `p - n`, `p++`/`p--`, all correctly
+  scaled by `sizeof(*p)` - 2 bytes for `int*`, 1 for `char*`),
+  pointer-minus-pointer (`p2 - p1`, giving an element count, not a
+  byte count), and pointer comparisons (`<` `>` `<=` `>=` `==` `!=`,
+  using an **unsigned** comparison since addresses aren't signed
+  quantities - unlike plain `int` comparisons, which are signed).
+  Arrays decay to a pointer to their first element wherever a pointer
+  is expected (passing an array as a function argument, assigning an
+  array to a pointer variable, etc.).
 - **Statements:** `if`/`else`, `while`, `for`, `break`, `continue`,
   `return`, blocks, local declarations (anywhere in a block), empty
   statement.
@@ -55,18 +75,30 @@ with a BASIC `10 SYS ...` loader stub, so `LOAD` then `RUN` works.
   `/` and `%` are correctly signed (truncate toward zero; remainder
   takes the sign of the dividend, matching C99).
 - **Literals:** decimal and `0x` hex integers, `'c'` char literals
-  with `\n \t \\ \' \" \0` escapes, `"string"` literals (only as the
-  sole argument to `puts()` - see below).
-- **Builtins:** `putchar(x)`, `puts("literal")`, `peek(addr)`,
-  `poke(addr, val)`.
+  with `\n \t \\ \' \" \0` escapes, and `"string"` literals, which are
+  real `char*` values now (interned as data, not just accepted by
+  `puts()` - see below).
+- **Builtins:** `putchar(x)`, `puts(s)` (accepts any `char*` - a
+  literal, a variable, a buffer you built at runtime, all walked at
+  runtime up to the first zero byte), `peek(addr)`, `poke(addr, val)`.
+- **Light type checking:** the compiler doesn't do full C type
+  checking, but it does catch some common pointer mistakes at compile
+  time rather than letting them corrupt memory silently: dereferencing
+  a non-pointer, `pointer + pointer`, `int - pointer`, passing a
+  plain value where a function expects a pointer (or vice versa), and
+  returning a plain value from a function declared to return a
+  pointer (or vice versa). `0` is always accepted as a valid pointer
+  value ("null") in these checks.
 
 ## Not supported yet (planned for later steps)
 
-Pointers (`*`, `&`), structs/unions, typedefs, function recursion,
-passing arrays to functions, multi-dimensional arrays, floating
+Pointer-to-pointer, function pointers, arrays of pointers, array
+*parameters* written with `[]` syntax (use `type *name` instead - it
+receives exactly the same decayed pointer), `struct`/`union`,
+`typedef`s, function recursion, multi-dimensional arrays, floating
 point, the preprocessor, `do`/`while`, `switch`, multiple source
 files, and anything like `printf` (there's no variadic support or
-string formatting - see `print_uint`/`print_int` in
+number-to-string formatting - see `print_uint`/`print_int` in
 `tests/features.c` for a hand-written decimal printer you can copy
 into your own programs in the meantime).
 
@@ -86,7 +118,10 @@ recursion and will still be needed once real recursion is added.
 
 If you write a recursive function, `cc64` will refuse to compile it
 with a clear error rather than silently generating code that
-corrupts the function's own parameters/locals on re-entry.
+corrupts the function's own parameters/locals on re-entry. Now that
+pointers and indirect addressing exist, adding a real per-call stack
+frame (and lifting this restriction) is a smaller, more natural next
+step than it would have been starting from scratch.
 
 ### Two-pass compilation
 
@@ -115,13 +150,16 @@ Those codes only render as letters once the C64 has been switched
 into its second character set, via PETSCII control code 14. `cc64`
 emits that switch once, automatically, as the very first thing your
 program does (before `main` even runs), so you don't have to think
-about it. With that in place, `puts("...")` (converted at compile
-time) and `putchar(x)` (converted at runtime, so it works even for
-values that aren't compile-time constants) both display text in the
-**same case you wrote it** - no flipping, no workaround needed. Plain
-`char` variables/arrays are **not** auto-converted (a byte is just a
-byte until you print it) - only the print path applies PETSCII
-mapping.
+about it. With that in place, `putchar(x)` and `puts(s)` both
+PETSCII-convert at **runtime** (via the same small conversion
+routine), so text displays in the **same case you wrote it** whether
+it came from a string literal, a buffer you built yourself, or a
+single computed character - no flipping, no workaround needed. String
+literals are stored as their exact raw bytes (not pre-converted at
+compile time) precisely so that this one runtime routine handles
+every case uniformly. Plain `char` variables/arrays are **not**
+auto-converted (a byte is just a byte until you print it) - only the
+print path applies PETSCII mapping.
 
 (This one was actually caught after the fact: my first version didn't
 emit the charset switch, so all-uppercase test output rendered as
@@ -134,22 +172,44 @@ the emulator are fixed now.)
 ### Zero-page usage
 
 ```
-$02/$03  __zpSP   soft operand-stack pointer
-$F3/$F4  __zpAP   effective-address pointer (array/peek/poke)
-$F5/$F6  __zpAP2  saved-AP scratch (assign/compound-assign to arrays)
-$F7/$F8  __zpT1   runtime-library scratch
-$F9/$FA  __zpT0   runtime-library scratch
+$02/$03  __zpAP   effective-address pointer (array/deref/pointer-index/peek/poke)
 $FB/$FC  __zpR    primary register / function return value
 $FD/$FE  __zpR2   secondary operand register
 ```
 
-These are the classic "free for machine code" zero-page bytes used
-when a program takes over via `SYS` and isn't concurrently relying on
-BASIC floating point or RS-232 routines. All compiler-generated
-assembly symbols (`__fn_`, `__g_`, `__L`, `__rt_`, `__zp`) live in
-C's own reserved-identifier namespace (leading double underscore, or
-underscore + capital), so they can never collide with a valid user
-identifier.
+Only these 6 bytes, and only these. Per the KERNAL's own memory map,
+`$02` and `$FB`-`$FE` are the *only* zero-page bytes confirmed
+genuinely unused by BASIC/KERNAL. An earlier version of this compiler
+also used `$F3`-`$FA` for scratch registers, on the assumption that
+they were "adjacent to the known-safe `$FB`-`$FE` range" and therefore
+probably fine - they looked free (nothing obviously touches them) but
+weren't: `$F3`/`$F4` is the current-line-in-color-RAM pointer, updated
+by CHROUT itself whenever it colors a printed character, and `$F5`/
+`$F6` is the keyboard-matrix-to-PETSCII conversion table pointer,
+touched by the keyboard scan on every background IRQ (~60x/sec)
+regardless of what the program does. `puts()` kept its walking pointer
+live across multiple `JSR CHROUT` calls in a loop - exactly the
+scenario where that collision corrupts memory mid-string and produces
+garbage output after the first character. This shipped and was caught
+by real-hardware testing, not by the verification here, since the
+purpose-built emulator didn't model real KERNAL zero-page usage either
+(it now poisons those bytes on every simulated `CHROUT` call
+specifically so this class of bug can't slip through silently again).
+
+Everything that doesn't strictly need `(zp),Y` indirection (the old
+`__zpAP2`/`__zpT0`/`__zpT1` scratch, and the operand-stack pointer)
+now lives in ordinary, non-zero-page RAM instead, which is always safe
+since it's memory this program exclusively owns - only zero page is
+contested territory. The operand stack itself moved from zero-page
+indirect-indexed addressing to plain `absolute,X` addressing (with the
+stack index held in a regular byte, not zero page) to make this
+possible; it now holds 128 slots instead of 256, which is still far
+more than any realistic expression nests.
+
+All compiler-generated assembly symbols (`__fn_`, `__g_`, `__L`, `__rt_`, `__zp`)
+live in C's own reserved-identifier namespace (leading double
+underscore, or underscore + capital), so they can never collide with
+a valid user identifier.
 
 ### Calling convention
 
@@ -157,14 +217,24 @@ Arguments are copied into the callee's fixed parameter slots, then a
 plain `JSR`. Return values are left in the primary register `__zpR`
 at `RTS` time - every `return expr;` just computes `expr` into `__zpR`
 and returns; there's no shared epilogue to tear down, since there's
-no stack frame to unwind.
+no stack frame to unwind. Pointer parameters/return values use this
+exact same mechanism - a pointer is just a 16-bit value like an `int`,
+always stored in the full 2-byte slot regardless of what it points to
+(a `char*` variable itself takes 2 bytes, even though each byte *it
+points to* is 1 byte).
 
 ## Testing
 
 There's no VICE/x64 or other 6502 emulator in this environment, so
 verification here was done with a small purpose-built emulator,
 `mini6502.py`, that implements exactly the opcode/addressing-mode
-subset `cc64` emits and traps `$FFD2` (CHROUT) in software:
+subset `cc64` emits and traps `$FFD2` (CHROUT) in software. Since a
+real zero-page collision with CHROUT/the KERNAL shipped once already
+(see "Zero-page usage" above) without this emulator catching it, it
+now also poisons the zero-page bytes CHROUT and the keyboard-scan IRQ
+are documented to touch (`$F3`-`$FA`) on every simulated CHROUT call,
+so a future regression back into that territory would show up here
+instead of only on real hardware:
 
 ```sh
 python3 mini6502.py program.prg program.lst
@@ -178,17 +248,22 @@ arithmetic and truncation rules, bitwise ops and shifts, all six
 comparisons (including negative operands), `&&`/`||` short-circuit
 evaluation (verified via a side-effect counter), non-recursive
 function calls, array fill/read/compound-assign/inc-dec, `peek`/
-`poke`, `break`/`continue`, and pre/post `++`/`--`. Every computed
-value was checked against hand-calculated expected output.
-`tests/forward.c` checks that forward/backward call references both
-work regardless of declaration order. `tests/hello.c` is the basic
-smoke test for the whole pipeline (BASIC stub, zero-page init, stack
-init, `puts`/`putchar`, PETSCII case mapping).
+`poke`, `break`/`continue`, and pre/post `++`/`--`. `tests/pointers.c`
+covers `&`/`*`, pointer arithmetic scaling (`int*` vs `char*`),
+pointer-minus-pointer, unsigned pointer comparisons, arrays decaying
+to pointers across a function call, a classic pointer-swap, a
+function returning a pointer, and a string literal used as a real
+runtime `char*` value copied through a hand-written `copy_str`. Every
+computed value in both was checked against hand-calculated expected
+output. `tests/forward.c` checks that forward/backward call
+references both work regardless of declaration order. `tests/hello.c`
+is the basic smoke test for the whole pipeline (BASIC stub, zero-page
+init, stack init, `puts`/`putchar`, PETSCII case mapping).
 
-Run all three:
+Run all four:
 
 ```sh
-for f in hello features forward; do
+for f in hello features forward pointers; do
     ./cc64 tests/$f.c -o tests/$f.asm
     ./c64asm tests/$f.asm -o tests/$f.prg --listing tests/$f.lst
     python3 mini6502.py tests/$f.prg tests/$f.lst
@@ -197,13 +272,15 @@ done
 
 ## Roadmap (next steps, in a sensible order)
 
-1. Pointers and `&`/`*` - unlocks passing arrays to functions,
-   `char*` strings as real values (not just literals), and is a
-   prerequisite for...
+1. ~~Pointers and `&`/`*`~~ - done. Unlocked passing arrays to
+   functions, `char*` strings as real runtime values, pointer
+   arithmetic, and is the prerequisite for...
 2. Function recursion - needs a real per-call stack frame for
    parameters/locals instead of static storage, built on top of the
-   pointer support above.
+   pointer/indirect-addressing support above. This is the natural
+   next step.
 3. `do`/`while`, `switch`.
-4. `struct`s.
-5. A tiny standard library: real `printf`-lite, string helpers.
+4. `struct`s (a natural pairing with pointers, once recursion is in).
+5. A tiny standard library: real `printf`-lite, string helpers
+   (`strlen`, `strcpy`, etc., now easy to write in terms of `char*`).
 6. Multiple source files / a simple `#include`.
