@@ -90,7 +90,7 @@ static Token *expect(TokKind k, const char *what) {
     return advance();
 }
 
-static int is_type_kw(TokKind k) { return k == T_INT || k == T_CHAR || k == T_VOID; }
+static int is_type_kw(TokKind k) { return k == T_INT || k == T_CHAR || k == T_VOID || k == T_STRUCT; }
 
 /* Several parsing functions call each other in a cycle that doesn't
  * follow a strict "top to bottom" order (parse_primary() needs
@@ -130,22 +130,110 @@ static int type_from_tok(TokKind k) {
     return -1; /* void */
 }
 
+/* Parses "type [*]" (base type + optional pointer star) - the type
+ * prefix shared by every kind of declaration: globals, locals,
+ * parameters, struct members, and function return types. Does NOT
+ * consume an identifier afterward - callers differ on what comes
+ * next (a function name that might be followed by `(`, a parameter
+ * name possibly followed by more parameters, a struct member name
+ * followed by `;`, ...), so this only handles the part that's
+ * genuinely identical everywhere: `int`, `char`, `void`, or
+ * `struct Tag`, then an optional `*`. */
+static void parse_type_prefix(int *type, int *structTag, int *isPointer) {
+    if (check(T_STRUCT)) {
+        advance();
+        if (!check(T_IDENT)) fatal(cur()->line, "expected struct tag name after 'struct'");
+        char *tag = advance()->text;
+        *type = TY_STRUCT;
+        *structTag = find_or_create_struct_tag(tag);
+    } else if (check(T_INT) || check(T_CHAR) || check(T_VOID)) {
+        *type = type_from_tok(advance()->kind);
+        *structTag = -1;
+    } else {
+        fatal(cur()->line, "expected a type");
+    }
+    *isPointer = 0;
+    if (check(T_STAR)) { *isPointer = 1; advance(); }
+    if (*type < 0 && *isPointer) fatal(cur()->line, "'void *' is not supported in this version");
+}
+
+/* `struct Tag { member-decl* };` - parsed and fully resolved (every
+ * member's offset, and the struct's total size) entirely here in
+ * pass_a, since a struct body is just a list of declarations with no
+ * expressions or statements that would need deferring to pass_b. See
+ * find_or_create_struct_tag()'s comment in symtab.c for how self- and
+ * mutually-referential structs (a member pointing back to its own
+ * struct, or to another struct defined later in the file) work. */
+static void parse_struct_def(void) {
+    advance(); /* 'struct' */
+    char *tagname = advance()->text; /* tag name, already confirmed T_IDENT by the caller */
+    int tagIdx = find_or_create_struct_tag(tagname);
+    StructDef *sd = &g_structs[tagIdx];
+    if (sd->defined) fatal(cur()->line, "redefinition of struct '%s'", tagname);
+    advance(); /* '{' */
+    int offset = 0;
+    while (!check(T_RBRACE)) {
+        int mtype, mStructTag, mIsPointer;
+        parse_type_prefix(&mtype, &mStructTag, &mIsPointer);
+        if (mtype < 0) fatal(cur()->line, "'void' is not a valid struct member type");
+        if (mtype == TY_STRUCT && !mIsPointer)
+            fatal(cur()->line, "struct members must be int, char, or a pointer "
+                                "(a nested struct-by-value member is not supported "
+                                "in this version - use a pointer instead)");
+        if (!check(T_IDENT)) fatal(cur()->line, "expected member name");
+        char *mname = advance()->text;
+        if (check(T_LBRACKET)) fatal(cur()->line, "array members are not supported in this version");
+        expect(T_SEMI, "';'");
+        for (int i = 0; i < sd->nmembers; i++)
+            if (strcmp(sd->members[i].name, mname) == 0)
+                fatal(cur()->line, "duplicate member '%s' in struct '%s'", mname, tagname);
+        if (sd->nmembers >= (int)(sizeof(sd->members)/sizeof(sd->members[0])))
+            fatal(cur()->line, "too many members in struct '%s'", tagname);
+        StructMember *m = &sd->members[sd->nmembers++];
+        memset(m, 0, sizeof(*m));
+        strncpy(m->name, mname, sizeof(m->name)-1);
+        m->type = mtype; m->isPointer = mIsPointer; m->structTag = mStructTag;
+        m->width = var_width(mtype, mIsPointer, mStructTag); /* always 2 for a pointer
+            member - safe even if mStructTag is still incomplete (self/mutual
+            reference), since var_width() checks isPointer before ever touching
+            g_structs[structTag] */
+        m->offset = offset;
+        offset += m->width;
+    }
+    advance(); /* '}' */
+    expect(T_SEMI, "';'");
+    sd->size = offset;
+    sd->defined = 1;
+}
+
 /* One iteration of this loop handles exactly one top-level
- * declaration: either `type [*] name ( params ) { body }` (a
- * function - body skipped, not parsed) or `type [*] name [size];`
- * (a global variable, optionally an array, optionally with a simple
- * constant initializer). Everything this function records goes
- * straight into g_funcs[]/g_globals[] via find_func()/g_globals[]. */
+ * declaration: a `struct Tag { ... };` definition, a function
+ * (`type [*] name ( params ) { body }`, body skipped, not parsed), or
+ * a global variable (`type [*] name [size];`, optionally with a
+ * simple constant initializer). Everything this function records goes
+ * straight into g_structs[]/g_funcs[]/g_globals[]. */
 void pass_a(void) {
     g_pos = 0;
     while (!check(T_EOF)) {
+        /* A struct DEFINITION (`struct Tag {`) is the one top-level
+         * form that doesn't fit the "type [*] name" shape everything
+         * else here has - it needs to be recognized before falling
+         * into the general parse_type_prefix() path, which would
+         * otherwise treat `struct Tag` as if it were introducing a
+         * variable or function called `Tag`. Peeking two tokens ahead
+         * (past 'struct' and the tag name) to check for '{' is what
+         * distinguishes a definition from `struct Tag *next;` or
+         * `struct Tag g;`, both of which DO fall through to the
+         * general path below. */
+        if (check(T_STRUCT) && peekAt(1)->kind == T_IDENT && peekAt(2)->kind == T_LBRACE) {
+            parse_struct_def();
+            continue;
+        }
+
         if (!is_type_kw(cur()->kind))
             fatal(cur()->line, "expected type at top level");
-        TokKind tk = advance()->kind;
-        int rIsPointer = 0;
-        if (check(T_STAR)) { rIsPointer = 1; advance(); }
-        int rtype = type_from_tok(tk);
-        if (rIsPointer && rtype < 0) fatal(cur()->line, "'void *' is not supported in this version");
+        int rtype, rStructTag, rIsPointer;
+        parse_type_prefix(&rtype, &rStructTag, &rIsPointer);
         if (!check(T_IDENT)) fatal(cur()->line, "expected identifier after type");
         char *name = advance()->text;
         if (is_builtin(name))
@@ -163,7 +251,12 @@ void pass_a(void) {
                 strncpy(fn->name, name, sizeof(fn->name)-1);
                 fn->retType = rtype;
                 fn->retIsPointer = rIsPointer;
+                fn->retStructTag = rStructTag;
             }
+            if (rtype == TY_STRUCT && !rIsPointer)
+                fatal(cur()->line, "function '%s' returns a struct by value; return "
+                                    "'struct %s *' instead (structs must be passed by "
+                                    "pointer in this version)", name, g_structs[rStructTag].name);
             fn->nparams = 0;
             if (check(T_VOID) && peekAt(1)->kind == T_RPAREN) {
                 advance();
@@ -171,17 +264,22 @@ void pass_a(void) {
                 for (;;) {
                     if (!is_type_kw(cur()->kind))
                         fatal(cur()->line, "expected parameter type");
-                    TokKind ptk = advance()->kind;
-                    int pIsPointer = 0;
-                    if (check(T_STAR)) { pIsPointer = 1; advance(); }
-                    if (ptk == T_VOID && !pIsPointer) fatal(cur()->line, "void is not a valid parameter type");
+                    int ptype, pStructTag, pIsPointer;
+                    parse_type_prefix(&ptype, &pStructTag, &pIsPointer);
+                    if (ptype < 0) fatal(cur()->line, "void is not a valid parameter type");
                     if (!check(T_IDENT)) fatal(cur()->line, "expected parameter name");
                     char *pname = advance()->text;
                     if (check(T_LBRACKET))
-                        fatal(cur()->line, "array parameters are not supported; use a pointer ('%s *%s') instead", tk==T_CHAR?"char":"int", pname);
+                        fatal(cur()->line, "array parameters are not supported; use a pointer instead");
+                    if (ptype == TY_STRUCT && !pIsPointer)
+                        fatal(cur()->line, "parameter '%s' is a struct passed by value; use "
+                                            "'struct %s *%s' instead (structs must be passed "
+                                            "by pointer in this version)", pname,
+                                            g_structs[pStructTag].name, pname);
                     if (fn->nparams >= 32) fatal(cur()->line, "too many parameters");
-                    fn->paramTypes[fn->nparams] = type_from_tok(ptk);
+                    fn->paramTypes[fn->nparams] = ptype;
                     fn->paramIsPointer[fn->nparams] = pIsPointer;
+                    fn->paramStructTag[fn->nparams] = pStructTag;
                     strncpy(fn->paramNames[fn->nparams], pname, 63);
                     fn->nparams++;
                     if (check(T_COMMA)) { advance(); continue; }
@@ -202,6 +300,7 @@ void pass_a(void) {
         strncpy(g.name, name, sizeof(g.name)-1);
         g.type = rtype;
         g.isPointer = rIsPointer;
+        g.structTag = rStructTag;
         if (check(T_LBRACKET)) {
             if (rIsPointer) fatal(cur()->line, "arrays of pointers are not supported in this version");
             advance();
@@ -210,9 +309,12 @@ void pass_a(void) {
             g.arrLen = (int)advance()->ival;
             expect(T_RBRACKET, "']'");
         }
+        if (rtype == TY_STRUCT && !rIsPointer)
+            require_complete_struct(rStructTag, cur()->line); /* need a known size to allocate storage */
         if (check(T_ASSIGN)) {
             advance();
             if (g.isPointer) fatal(cur()->line, "pointer initializers are not supported in this version");
+            if (g.type == TY_STRUCT) fatal(cur()->line, "struct initializers are not supported in this version");
             int neg = 0;
             if (check(T_MINUS)) { neg = 1; advance(); }
             long v;
@@ -283,10 +385,17 @@ static Node *parse_primary(void) {
     return NULL; /* unreachable */
 }
 
-/* Postfix operators: array/pointer indexing `a[i]` and postfix
- * `x++`/`x--`. These bind tighter than anything else and can chain
- * (`a[i]++` first indexes, then increments the result), which is why
- * this is a loop around parse_primary() rather than a single check. */
+/* Postfix operators: array/pointer indexing `a[i]`, member access
+ * `.`/`->`, and postfix `x++`/`x--`. These bind tighter than anything
+ * else and can chain (`a[i].next->val++` indexes, then two member
+ * accesses, then increments the result), which is why this is a loop
+ * around parse_primary() rather than a single check.
+ *
+ * `a->b` is parsed as sugar for `(*a).b`: it builds an N_DEREF node
+ * wrapping `a`, then an N_MEMBER node wrapping THAT - so codegen only
+ * ever has to handle one member-access shape (N_MEMBER whose base is
+ * already "the struct itself", never "a pointer to it"), and gets
+ * dereferencing for free from the machinery `*p` already has. */
 static Node *parse_postfix(void) {
     Node *n = parse_primary();
     for (;;) {
@@ -297,6 +406,21 @@ static Node *parse_postfix(void) {
             Node *ix = node_new(N_INDEX, lb->line);
             ix->a = n; ix->b = idx;
             n = ix;
+        } else if (check(T_DOT)) {
+            Token *t = advance();
+            if (!check(T_IDENT)) fatal(cur()->line, "expected member name after '.'");
+            char *mname = advance()->text;
+            Node *m = node_new(N_MEMBER, t->line);
+            m->a = n; m->name = mname;
+            n = m;
+        } else if (check(T_ARROW)) {
+            Token *t = advance();
+            if (!check(T_IDENT)) fatal(cur()->line, "expected member name after '->'");
+            char *mname = advance()->text;
+            Node *deref = node_new(N_DEREF, t->line); deref->a = n;
+            Node *m = node_new(N_MEMBER, t->line);
+            m->a = deref; m->name = mname;
+            n = m;
         } else if (check(T_INC)) {
             Token *t = advance();
             Node *p = node_new(N_POSTINC, t->line); p->a = n; n = p;
@@ -431,7 +555,7 @@ static Node *parse_logor(void) {
  * value. `x = 5` is fine; `(x + 1) = 5` is not, and is_lvalue_node()
  * is what parse_assign() below uses to reject it with a clear error
  * instead of generating nonsensical code for it. */
-static int is_lvalue_node(Node *n) { return n->kind == N_IDENT || n->kind == N_INDEX || n->kind == N_DEREF; }
+static int is_lvalue_node(Node *n) { return n->kind == N_IDENT || n->kind == N_INDEX || n->kind == N_DEREF || n->kind == N_MEMBER; }
 
 /* Assignment is the loosest-binding operator and, unlike everything
  * above, right-associative (`a = b = c` means `a = (b = c)`), which is
@@ -480,15 +604,16 @@ static Node *parse_expr(void) { return parse_assign(); }
  * N_VARDECL's case in gen_stmt(), codegen_stmt.c). */
 static Node *parse_vardecl(void) {
     Token *tt = cur();
-    TokKind tk = advance()->kind; /* int|char, already known to be a type */
-    int isPointer = 0;
-    if (check(T_STAR)) { isPointer = 1; advance(); }
+    int type, structTag, isPointer;
+    parse_type_prefix(&type, &structTag, &isPointer);
+    if (type < 0) fatal(tt->line, "'void' is not a valid variable type");
     if (!check(T_IDENT)) fatal(cur()->line, "expected identifier");
     char *name = advance()->text;
     Node *n = node_new(N_VARDECL, tt->line);
     n->name = name;
-    n->declType = type_from_tok(tk);
+    n->declType = type;
     n->declIsPointer = isPointer;
+    n->declStructTag = structTag;
     if (check(T_LBRACKET)) {
         if (isPointer) fatal(cur()->line, "arrays of pointers are not supported in this version");
         advance();
@@ -496,9 +621,12 @@ static Node *parse_vardecl(void) {
         n->declArrLen = (int)advance()->ival;
         expect(T_RBRACKET, "']'");
     }
+    if (type == TY_STRUCT && !isPointer)
+        require_complete_struct(structTag, tt->line); /* need a known size to allocate storage */
     if (check(T_ASSIGN)) {
         advance();
         if (n->declArrLen) fatal(n->line, "array initializers are not supported in this version");
+        if (type == TY_STRUCT && !isPointer) fatal(n->line, "struct initializers are not supported in this version");
         n->a = parse_assign();
     }
     expect(T_SEMI, "';'");
@@ -507,7 +635,8 @@ static Node *parse_vardecl(void) {
      * statements in the same function refer to it - parse_primary()'s
      * handling of a bare identifier just looks it up via find_local(),
      * which only works if register_local() has already run for it. */
-    register_local(name, n->declType, n->declIsPointer, n->declArrLen != 0, n->declArrLen, 0, n->line);
+    register_local(name, n->declType, n->declIsPointer, n->declStructTag,
+                    n->declArrLen != 0, n->declArrLen, 0, n->line);
     return n;
 }
 
@@ -605,7 +734,20 @@ static Node *parse_block(void) {
 void pass_b(void) {
     g_pos = 0;
     while (!check(T_EOF)) {
-        advance(); /* type keyword - already recorded by pass_a, just skip it */
+        /* struct definition - already fully processed by pass_a();
+         * skip it the same way skip_balanced() skips a function body,
+         * rather than falling into the "type [*] name" skip logic
+         * below, which doesn't apply to it at all. */
+        if (check(T_STRUCT) && peekAt(1)->kind == T_IDENT && peekAt(2)->kind == T_LBRACE) {
+            advance(); advance(); /* 'struct' Tag */
+            skip_balanced(T_LBRACE, T_RBRACE);
+            expect(T_SEMI, "';'");
+            continue;
+        }
+
+        /* type keyword - already recorded by pass_a, just skip it.
+         * `struct Tag` is two tokens where int/char/void is one. */
+        if (check(T_STRUCT)) { advance(); advance(); } else advance();
         if (check(T_STAR)) advance(); /* optional pointer '*'; already validated in pass A */
         char *name = advance()->text; /* ident */
 
@@ -629,7 +771,8 @@ void pass_b(void) {
             g_nlocals = 0;
             g_curfn = fn;
             for (int i = 0; i < fn->nparams; i++)
-                register_local(fn->paramNames[i], fn->paramTypes[i], fn->paramIsPointer[i], 0, 0, 1, 0);
+                register_local(fn->paramNames[i], fn->paramTypes[i], fn->paramIsPointer[i],
+                                fn->paramStructTag[i], 0, 0, 1, 0);
             Node *body = parse_block();
             emit_function(fn, body);
             g_curfn = NULL;

@@ -38,10 +38,12 @@
  * to know an LVInfo exists, which is why it lives here rather than in
  * cc64.h alongside the types every file needs. */
 typedef struct {
-    int isArray;       /* true: access indirectly via __zpAP (array elem, *p, p[i]) */
-    int type;           /* elem/pointee type for indirect access; var type for scalars */
+    int isArray;       /* true: access indirectly via __zpAP (array elem, *p, p[i], or a struct member reached through either) */
+    int type;           /* elem/pointee/member type for indirect access; var type for scalars */
     int isPointer;       /* only meaningful when !isArray: the scalar itself holds an address */
-    char label[96];     /* scalar: storage label. (unused when isArray) */
+    int structTag;        /* valid iff type==TY_STRUCT && isPointer (a pointer-to-struct variable) */
+    int offset;            /* only meaningful when isArray: byte offset added to __zpAP (0 except for a struct member reached through a pointer or array - see N_MEMBER in resolve_lvalue_base()) */
+    char label[96];     /* scalar: storage label, possibly "base+N" for a struct member reached directly (unused when isArray) */
 } LVInfo;
 
 /* ===================================================================
@@ -105,6 +107,27 @@ void gen_store_scalar(const char *label, int type, int isPointer) {
  * without needing to know which of the three cases it actually was.
  * =================================================================== */
 
+/* Scales __zpR (an array/pointer index) by `width` bytes - the
+ * per-element step for indexing. 1 needs no work at all; 2 (an int or
+ * any pointer) is a single shift, same as before structs existed; any
+ * other width (a struct element - the only way width isn't 1 or 2)
+ * needs a real multiply by a compile-time constant, so this loads
+ * that constant into __zpR2 and reuses __rt_mul16 rather than adding
+ * a second, more specialized multiply routine to codegen_runtime.c
+ * for a case that isn't performance-sensitive. */
+static void emit_scale_index(int width) {
+    if (width == 2) {
+        emit("    ASL __zpR");
+        emit("    ROL __zpR+1");
+    } else if (width != 1) {
+        emit("    LDA #%d", width & 0xFF);
+        emit("    STA __zpR2");
+        emit("    LDA #%d", (width >> 8) & 0xFF);
+        emit("    STA __zpR2+1");
+        emit("    JSR __rt_mul16");
+    }
+}
+
 static void resolve_lvalue_base(Node *n, LVInfo *lv) {
     memset(lv, 0, sizeof(*lv));
     if (n->kind == N_IDENT) {
@@ -114,6 +137,7 @@ static void resolve_lvalue_base(Node *n, LVInfo *lv) {
             local_label(lv->label, sizeof(lv->label), g_curfn->name, n->name);
             lv->type = l->type;
             lv->isPointer = l->isPointer;
+            lv->structTag = l->structTag;
             return;
         }
         GSym *g = find_global(n->name);
@@ -122,6 +146,7 @@ static void resolve_lvalue_base(Node *n, LVInfo *lv) {
         global_label(lv->label, sizeof(lv->label), n->name);
         lv->type = g->type;
         lv->isPointer = g->isPointer;
+        lv->structTag = g->structTag;
         return;
     }
     if (n->kind == N_DEREF) {
@@ -134,6 +159,67 @@ static void resolve_lvalue_base(Node *n, LVInfo *lv) {
         emit("    STA __zpAP+1");
         lv->isArray = 1;
         lv->type = pt.base;
+        lv->structTag = pt.structTag;
+        return;
+    }
+    if (n->kind == N_MEMBER) {
+        /* `p->x` was already desugared to N_MEMBER(N_DEREF(p), x) by
+         * the parser (see parse_postfix() in parser.c), so by the
+         * time we get here n->a is always "the struct itself", never
+         * "a pointer to it" - infer_type(n->a) reports isPointer=0
+         * for any expression that went through a deref (whether from
+         * `->` or an explicit `*p`). Seeing isPointer=1 here means
+         * the user wrote plain `.` on something that's actually a
+         * pointer, or on a bare array (which decays to a pointer) -
+         * both real usage mistakes worth a clear error. */
+        CType baseType = infer_type(n->a);
+        if (baseType.base != TY_STRUCT) fatal(n->line, "'.'/'->' used on a value that isn't a struct");
+        if (baseType.isPointer) fatal(n->line, "'.' used on a pointer or array; use '->' for a "
+                                                "pointer, or index into the array first");
+        require_complete_struct(baseType.structTag, n->line);
+        StructMember *m = find_struct_member(baseType.structTag, n->name, n->line);
+
+        if (n->a->kind == N_IDENT) {
+            /* Direct struct variable: a compile-time-constant base
+             * label, so the member's address is just "label+offset" -
+             * no runtime indirection needed at all. Reusing the
+             * label field this way (rather than always going through
+             * __zpAP) is what makes `structVar.field = x;` exactly as
+             * cheap as accessing any other plain variable. */
+            char base[96];
+            LSym *l = g_curfn ? find_local(n->a->name) : NULL;
+            if (l) local_label(base, sizeof(base), g_curfn->name, n->a->name);
+            else {
+                GSym *g = find_global(n->a->name);
+                if (!g) fatal(n->a->line, "undeclared identifier '%s'", n->a->name);
+                global_label(base, sizeof(base), n->a->name);
+            }
+            if (m->offset == 0) snprintf(lv->label, sizeof(lv->label), "%s", base);
+            else snprintf(lv->label, sizeof(lv->label), "%s+%d", base, m->offset);
+            lv->isArray = 0;
+            lv->type = m->type;
+            lv->isPointer = m->isPointer;
+            lv->structTag = m->structTag;
+            return;
+        }
+
+        /* Otherwise n->a is N_DEREF (from `->`, or an explicit
+         * `(*p).x`) or N_INDEX (a struct array element, `arr[i].x`) -
+         * both have a runtime-computed base address. Resolving n->a
+         * on its own sets __zpAP to that base exactly as if n->a were
+         * the final target; this member's offset just shifts where
+         * within that block gen_lv_load_to_R()/gen_lv_store_from_R()
+         * (which both already know how to apply lv->offset) actually
+         * read or write. */
+        LVInfo baseLv;
+        resolve_lvalue_base(n->a, &baseLv); /* sets __zpAP; the rest of baseLv is discarded */
+        lv->isArray = 1;
+        lv->offset = baseLv.offset + m->offset; /* baseLv.offset is 0 here in every
+            currently-reachable case (N_DEREF/N_INDEX both leave it 0), but adding it
+            rather than assuming so keeps this correct if that ever changes */
+        lv->type = m->type;
+        lv->isPointer = m->isPointer;
+        lv->structTag = m->structTag;
         return;
     }
     if (n->kind == N_INDEX) {
@@ -143,14 +229,12 @@ static void resolve_lvalue_base(Node *n, LVInfo *lv) {
             LSym *l = g_curfn ? find_local(n->a->name) : NULL;
             GSym *g = l ? NULL : find_global(n->a->name);
             if ((l && l->isArray) || (g && g->isArray)) {
-                char base[96]; int elemType;
-                if (l) { local_label(base, sizeof(base), g_curfn->name, n->a->name); elemType = l->type; }
-                else   { global_label(base, sizeof(base), n->a->name); elemType = g->type; }
+                char base[96]; int elemType, elemStructTag;
+                if (l) { local_label(base, sizeof(base), g_curfn->name, n->a->name); elemType = l->type; elemStructTag = l->structTag; }
+                else   { global_label(base, sizeof(base), n->a->name); elemType = g->type; elemStructTag = g->structTag; }
                 gen_expr_to_R(n->b); /* index -> __zpR */
-                if (elemType == TY_INT) {
-                    emit("    ASL __zpR");
-                    emit("    ROL __zpR+1");
-                }
+                emit_scale_index(var_width(elemType, 0, elemStructTag)); /* array elements are
+                    never pointers themselves (no arrays-of-pointers), so isPointer=0 here always */
                 emit("    CLC");
                 emit("    LDA __zpR");
                 emit("    ADC #<%s", base);
@@ -160,6 +244,7 @@ static void resolve_lvalue_base(Node *n, LVInfo *lv) {
                 emit("    STA __zpAP+1");
                 lv->isArray = 1;
                 lv->type = elemType;
+                lv->structTag = elemStructTag;
                 return;
             }
         }
@@ -172,10 +257,7 @@ static void resolve_lvalue_base(Node *n, LVInfo *lv) {
         gen_expr_to_R(n->a);       /* base pointer value -> __zpR */
         emit("    JSR __rt_push"); /* save it on the operand stack */
         gen_expr_to_R(n->b);       /* index -> __zpR */
-        if (elemType == TY_INT) {
-            emit("    ASL __zpR");
-            emit("    ROL __zpR+1");
-        }
+        emit_scale_index(var_width(elemType, 0, pt.structTag));
         emit("    JSR __rt_pop2"); /* __zpR2 = base pointer, __zpR = scaled index */
         emit("    CLC");
         emit("    LDA __zpR2");
@@ -186,6 +268,7 @@ static void resolve_lvalue_base(Node *n, LVInfo *lv) {
         emit("    STA __zpAP+1");
         lv->isArray = 1;
         lv->type = elemType;
+        lv->structTag = pt.structTag;
         return;
     }
     fatal(n->line, "expression is not assignable");
@@ -194,14 +277,21 @@ static void resolve_lvalue_base(Node *n, LVInfo *lv) {
 /* Once resolve_lvalue_base() has filled in an LVInfo, these two
  * functions are how every caller actually reads or writes the value -
  * dispatching on lv->isArray to pick "direct label access" vs.
- * "indirect through __zpAP" without the caller needing to care which. */
+ * "indirect through __zpAP" without the caller needing to care which.
+ * `lv->offset` (0 for a plain dereference/array element; a struct
+ * member's byte offset otherwise - see N_MEMBER in
+ * resolve_lvalue_base() below) shifts where in the addressed block
+ * this particular value lives. */
 static void gen_lv_load_to_R(LVInfo *lv) {
     if (!lv->isArray) { gen_load_scalar(lv->label, lv->type, lv->isPointer); return; }
-    emit("    LDY #0");
+    int wide = lv->isPointer || lv->type == TY_INT; /* isPointer first: a pointer
+        member is always 2 bytes no matter what it points to (see gen_load_scalar's
+        identical reasoning for the direct-label path above) */
+    emit("    LDY #%d", lv->offset);
     emit("    LDA (__zpAP),Y");
     emit("    STA __zpR");
-    if (lv->type == TY_INT) {
-        emit("    INY");
+    if (wide) {
+        emit("    LDY #%d", lv->offset + 1);
         emit("    LDA (__zpAP),Y");
         emit("    STA __zpR+1");
     } else {
@@ -211,11 +301,12 @@ static void gen_lv_load_to_R(LVInfo *lv) {
 }
 static void gen_lv_store_from_R(LVInfo *lv) {
     if (!lv->isArray) { gen_store_scalar(lv->label, lv->type, lv->isPointer); return; }
-    emit("    LDY #0");
+    int wide = lv->isPointer || lv->type == TY_INT;
+    emit("    LDY #%d", lv->offset);
     emit("    LDA __zpR");
     emit("    STA (__zpAP),Y");
-    if (lv->type == TY_INT) {
-        emit("    INY");
+    if (wide) {
+        emit("    LDY #%d", lv->offset + 1);
         emit("    LDA __zpR+1");
         emit("    STA (__zpAP),Y");
     }
@@ -426,7 +517,7 @@ static void gen_call(Node *n) {
 static void gen_incdec(Node *n, int isInc, int isPost) {
     LVInfo lv;
     resolve_lvalue_base(n->a, &lv);
-    int step = (lv.isPointer && lv.type == TY_INT) ? 2 : 1;
+    int step = lv.isPointer ? var_width(lv.type, 0, lv.structTag) : 1;
     gen_lv_load_to_R(&lv);
     if (isPost) {
         emit("    LDA __zpR");
@@ -437,18 +528,18 @@ static void gen_incdec(Node *n, int isInc, int isPost) {
     if (isInc) {
         emit("    CLC");
         emit("    LDA __zpR");
-        emit("    ADC #%d", step);
+        emit("    ADC #%d", step & 0xFF);
         emit("    STA __zpR");
         emit("    LDA __zpR+1");
-        emit("    ADC #0");
+        emit("    ADC #%d", (step >> 8) & 0xFF);
         emit("    STA __zpR+1");
     } else {
         emit("    SEC");
         emit("    LDA __zpR");
-        emit("    SBC #%d", step);
+        emit("    SBC #%d", step & 0xFF);
         emit("    STA __zpR");
         emit("    LDA __zpR+1");
-        emit("    SBC #0");
+        emit("    SBC #%d", (step >> 8) & 0xFF);
         emit("    STA __zpR+1");
     }
     /* if the lvalue is an array element, __zpAP is still valid (index
@@ -507,10 +598,33 @@ void gen_expr_to_R(Node *n) {
                 emit("    STA __zpR+1");
                 return;
             }
+            /* A struct held BY VALUE (not a pointer to one) has no
+             * single 16-bit value to put in __zpR - there's simply
+             * nowhere for "the whole struct" to go through this
+             * compiler's one-register expression model. Using & to
+             * get its address (see N_ADDR below) is the way to work
+             * with it instead - exactly how you'd pass or return one
+             * anyway, since structs are pointer-only in this version. */
+            CType t = (l ? (CType){ l->type, l->isPointer, l->structTag }
+                         : (CType){ g->type, g->isPointer, g->structTag });
+            if (t.base == TY_STRUCT && !t.isPointer)
+                fatal(n->line, "cannot use a struct by value here; use & to take its address");
+            LVInfo lv; resolve_lvalue_base(n, &lv); gen_lv_load_to_R(&lv);
+            return;
+        }
+        case N_MEMBER: {
+            /* A member can never itself be a struct by value (see
+             * StructDef's comment in cc64.h - members are always
+             * char/int/pointer), so unlike N_IDENT/N_INDEX/N_DEREF
+             * there's no "used a struct by value" case to guard
+             * against here at all. */
             LVInfo lv; resolve_lvalue_base(n, &lv); gen_lv_load_to_R(&lv);
             return;
         }
         case N_INDEX: {
+            CType t = infer_type(n);
+            if (t.base == TY_STRUCT && !t.isPointer)
+                fatal(n->line, "cannot use a struct by value here; use & to take its address");
             LVInfo lv; resolve_lvalue_base(n, &lv); gen_lv_load_to_R(&lv);
             return;
         }
@@ -531,18 +645,42 @@ void gen_expr_to_R(Node *n) {
                 emit("    STA __zpR+1");
                 return;
             }
-            if (operand->kind == N_INDEX || operand->kind == N_DEREF) {
-                LVInfo lv; resolve_lvalue_base(operand, &lv); /* always sets __zpAP for these kinds */
-                emit("    LDA __zpAP");
-                emit("    STA __zpR");
-                emit("    LDA __zpAP+1");
-                emit("    STA __zpR+1");
+            if (operand->kind == N_INDEX || operand->kind == N_DEREF || operand->kind == N_MEMBER) {
+                /* resolve_lvalue_base() always leaves EITHER __zpAP
+                 * set (isArray - N_INDEX/N_DEREF always take this
+                 * path, N_MEMBER does whenever its base isn't a
+                 * direct struct variable) OR lv.label as a ready-to-
+                 * use address expression (N_MEMBER's direct-struct-
+                 * variable fast path, e.g. "__g_p+2"). lv.offset is 0
+                 * for N_INDEX/N_DEREF and whatever this member's
+                 * byte offset is for N_MEMBER - adding it here (a
+                 * harmless ADC #0 in the first two cases) is what
+                 * makes `&p->x` and `&arr[i].x` point at the MEMBER,
+                 * not the start of the struct/element it lives in. */
+                LVInfo lv; resolve_lvalue_base(operand, &lv);
+                if (lv.isArray) {
+                    emit("    CLC");
+                    emit("    LDA __zpAP");
+                    emit("    ADC #%d", lv.offset & 0xFF);
+                    emit("    STA __zpR");
+                    emit("    LDA __zpAP+1");
+                    emit("    ADC #%d", (lv.offset >> 8) & 0xFF);
+                    emit("    STA __zpR+1");
+                } else {
+                    emit("    LDA #<%s", lv.label);
+                    emit("    STA __zpR");
+                    emit("    LDA #>%s", lv.label);
+                    emit("    STA __zpR+1");
+                }
                 return;
             }
             fatal(n->line, "cannot take the address of this expression");
             return;
         }
         case N_DEREF: {
+            CType t = infer_type(n);
+            if (t.base == TY_STRUCT && !t.isPointer)
+                fatal(n->line, "cannot use a struct by value here; use & to take its address");
             LVInfo lv; resolve_lvalue_base(n, &lv); gen_lv_load_to_R(&lv);
             return;
         }
@@ -625,26 +763,44 @@ void gen_expr_to_R(Node *n) {
                 if (ta.isPointer && tb.isPointer) {
                     if (strcmp(op, "+") == 0)
                         fatal(n->line, "invalid operands to binary '+' (pointer + pointer)");
-                    int esize = (ta.base == TY_INT) ? 2 : 1;
+                    int esize = var_width(ta.base, 0, ta.structTag);
                     gen_expr_to_R(n->a);
                     emit("    JSR __rt_push");
                     gen_expr_to_R(n->b);
                     emit("    JSR __rt_pop2");
                     gen_binop("-", 0); /* raw byte difference -> __zpR */
                     if (esize == 2) {
+                        /* fast path: a single arithmetic shift divides by 2 */
                         emit("    LDA __zpR+1");
                         emit("    CMP #$80");
                         emit("    ROR __zpR+1");
                         emit("    ROR __zpR");
+                    } else if (esize != 1) {
+                        /* struct pointer: general signed division by a
+                         * compile-time constant, via the same runtime
+                         * routine ordinary `/` uses (see gen_binop()) */
+                        emit("    LDA __zpR");
+                        emit("    STA __zpR2");
+                        emit("    LDA __zpR+1");
+                        emit("    STA __zpR2+1");
+                        emit("    LDA #%d", esize & 0xFF);
+                        emit("    STA __zpR");
+                        emit("    LDA #%d", (esize >> 8) & 0xFF);
+                        emit("    STA __zpR+1");
+                        emit("    JSR __rt_sdivmod16");
+                        emit("    LDA __zpR2");
+                        emit("    STA __zpR");
+                        emit("    LDA __zpR2+1");
+                        emit("    STA __zpR+1");
                     }
                     return;
                 }
                 if (!ta.isPointer && tb.isPointer) {
                     if (strcmp(op, "-") == 0)
                         fatal(n->line, "invalid operands to binary '-' (int - pointer)");
-                    int esize = (tb.base == TY_INT) ? 2 : 1;
+                    int esize = var_width(tb.base, 0, tb.structTag);
                     gen_expr_to_R(n->a);
-                    if (esize == 2) { emit("    ASL __zpR"); emit("    ROL __zpR+1"); }
+                    emit_scale_index(esize);
                     emit("    JSR __rt_push");
                     gen_expr_to_R(n->b);
                     emit("    JSR __rt_pop2");
@@ -652,11 +808,11 @@ void gen_expr_to_R(Node *n) {
                     return;
                 }
                 if (ta.isPointer && !tb.isPointer) {
-                    int esize = (ta.base == TY_INT) ? 2 : 1;
+                    int esize = var_width(ta.base, 0, ta.structTag);
                     gen_expr_to_R(n->a);
                     emit("    JSR __rt_push");
                     gen_expr_to_R(n->b);
-                    if (esize == 2) { emit("    ASL __zpR"); emit("    ROL __zpR+1"); }
+                    emit_scale_index(esize);
                     emit("    JSR __rt_pop2");
                     gen_binop(op, 0);
                     return;

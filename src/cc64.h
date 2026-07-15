@@ -15,8 +15,10 @@
  *                      operation - see below.
  *   2. ast.c           Defines the tree shape parsing builds (Node).
  *   3. symtab.c        Symbol tables (what's declared, and as what
- *                      type) plus a tiny type inference helper used
- *                      for pointer arithmetic and light type-checking.
+ *                      type - including `struct` layouts) plus a
+ *                      tiny type inference helper used for pointer
+ *                      arithmetic, struct member lookup, and light
+ *                      type-checking.
  *   4. parser.c        Tokens -> an AST, using recursive descent. Also
  *                      drives codegen function-by-function (see the
  *                      "two-pass" note below).
@@ -98,6 +100,33 @@
  * happens before parsing starts, pass_a()/pass_b() never know or care
  * that an #include happened at all - to them it's just a longer
  * token stream, exactly as if the text had been pasted in by hand.
+ *
+ * HOW STRUCTS WORK
+ * ------------------
+ * `struct Tag { members };` is parsed entirely in pass_a() (parser.c) -
+ * a struct body is just a list of declarations, with no expressions
+ * or statements that would need deferring to pass_b(), so by the time
+ * pass_b() runs, every struct's member offsets and total size are
+ * already known. Members are restricted to char, int, and pointers
+ * (never a nested struct held by value) specifically so offset/size
+ * computation stays this simple - no padding or alignment to worry
+ * about either, since this is a byte-addressed 8-bit machine.
+ *
+ * Structs are pointer-only everywhere they cross a function boundary
+ * (parameters and return values must be `struct Tag *`, never `struct
+ * Tag`) - by-value struct passing would mean copying the whole struct
+ * at every call, which is real machinery this step deliberately
+ * doesn't add. A struct VARIABLE, though, is perfectly ordinary: it's
+ * just a fixed-size block of memory at one address, exactly like an
+ * array is, and `a.b` on a directly-addressable struct variable
+ * compiles to nothing more than "load from that address plus this
+ * member's fixed offset" - no different in spirit from how `arr[3]`
+ * already worked before structs existed. `p->b` (or the equivalent
+ * `(*p).b`) is the one case that needs a genuine runtime address
+ * computation, and reuses the exact same __zpAP machinery pointer
+ * dereferencing already needed. See the comment above
+ * resolve_lvalue_base() in codegen_expr.c for exactly how the two
+ * cases share one code path.
  * =======================================================================
  */
 
@@ -116,10 +145,10 @@
 
 typedef enum {
     T_EOF, T_IDENT, T_NUM, T_CHARLIT, T_STRLIT,
-    T_INT, T_CHAR, T_VOID, T_IF, T_ELSE, T_WHILE, T_FOR, T_RETURN,
+    T_INT, T_CHAR, T_VOID, T_STRUCT, T_IF, T_ELSE, T_WHILE, T_FOR, T_RETURN,
     T_BREAK, T_CONTINUE,
     T_LPAREN, T_RPAREN, T_LBRACE, T_RBRACE, T_LBRACKET, T_RBRACKET,
-    T_SEMI, T_COMMA,
+    T_SEMI, T_COMMA, T_DOT, T_ARROW,
     T_ASSIGN, T_PLUS, T_MINUS, T_STAR, T_SLASH, T_PERCENT,
     T_EQ, T_NE, T_LT, T_GT, T_LE, T_GE,
     T_ANDAND, T_OROR, T_NOT, T_AMP, T_PIPE, T_CARET, T_TILDE,
@@ -143,7 +172,7 @@ typedef struct {
  * =================================================================== */
 
 typedef enum {
-    N_NUM, N_STR, N_IDENT, N_CALL, N_INDEX,
+    N_NUM, N_STR, N_IDENT, N_CALL, N_INDEX, N_MEMBER,
     N_ASSIGN, N_COMPOUND_ASSIGN, N_BINOP, N_LOGAND, N_LOGOR,
     N_UNARY, N_PREINC, N_PREDEC, N_POSTINC, N_POSTDEC,
     N_ADDR, N_DEREF,
@@ -162,14 +191,15 @@ typedef enum {
 typedef struct Node {
     NodeKind kind;
     char op[3];         /* operator text for N_BINOP/N_COMPOUND_ASSIGN/N_UNARY */
-    char *name;         /* identifier / function name */
+    char *name;         /* identifier / function name / member name (N_MEMBER) */
     long ival;           /* literal value, for N_NUM */
     char *sval;          /* string contents, for N_STR */
     struct Node *a, *b, *c, *d;
     struct Node *next;
-    int declType;        /* N_VARDECL: 0=char, 1=int (see TY_CHAR/TY_INT) */
+    int declType;        /* N_VARDECL: 0=char, 1=int, 2=struct (see TY_* below) */
     int declIsPointer;   /* N_VARDECL: declared as pointer-to-declType */
     int declArrLen;      /* N_VARDECL: 0 = scalar, else array length */
+    int declStructTag;   /* N_VARDECL: valid iff declType==TY_STRUCT */
     int line;
 } Node;
 
@@ -181,16 +211,47 @@ Node *node_new(NodeKind k, int line);
  * variable needs and how to address it)
  * =================================================================== */
 
-#define TY_CHAR 0
-#define TY_INT  1
+#define TY_CHAR   0
+#define TY_INT    1
+#define TY_STRUCT 2
+
+/* One member of a struct definition: its name, type (char/int, or a
+ * pointer - see StructDef's own comment for why never a nested
+ * struct-by-value), and its byte offset/width within the struct. */
+typedef struct {
+    char name[64];
+    int type;          /* TY_CHAR, TY_INT, or TY_STRUCT (only valid if isPointer) */
+    int isPointer;
+    int structTag;      /* valid iff type==TY_STRUCT */
+    int offset;          /* byte offset from the start of the struct */
+    int width;            /* 1 (char) or 2 (int/any pointer) */
+} StructMember;
+
+/* One `struct Tag { ... };` definition. `defined` distinguishes a
+ * fully-parsed struct from a mere forward reference (e.g. `struct Tag
+ * *next;` inside the struct's own body, or a mutual reference between
+ * two different structs, before its own `{ members }` has been seen) -
+ * see find_or_create_struct_tag()'s comment in symtab.c. Members are
+ * deliberately restricted to char/int/pointer - no nested struct-by-
+ * value member and no array member - which keeps offset/size
+ * computation trivial (no padding/alignment concerns either: this is
+ * a byte-addressed 8-bit machine, so members are packed with no gaps). */
+typedef struct {
+    char name[64];
+    StructMember members[32];
+    int nmembers;
+    int size;      /* total bytes; sum of every member's width */
+    int defined;
+} StructDef;
 
 /* A global variable's declared shape. Globals live at a fixed,
  * compile-time-known address (a label), so - unlike locals - they
  * don't need a "which function owns this" association. */
 typedef struct {
     char name[64];
-    int type;         /* TY_CHAR or TY_INT */
+    int type;         /* TY_CHAR, TY_INT, or TY_STRUCT */
     int isPointer;
+    int structTag;     /* valid iff type==TY_STRUCT */
     int isArray;
     int arrLen;
     long initVal;      /* for globals with a constant scalar initializer */
@@ -200,11 +261,13 @@ typedef struct {
 /* A function's signature - name, return type, and its parameters. */
 typedef struct {
     char name[64];
-    int retType;       /* TY_CHAR, TY_INT, or -1 for void */
+    int retType;       /* TY_CHAR, TY_INT, TY_STRUCT, or -1 for void */
     int retIsPointer;
+    int retStructTag;   /* valid iff retType==TY_STRUCT */
     int nparams;
     int paramTypes[32];
     int paramIsPointer[32];
+    int paramStructTag[32]; /* valid iff paramTypes[i]==TY_STRUCT */
     char paramNames[32][64];
     int defined;         /* has a body been seen (not just a prototype)? */
 } FnSym;
@@ -215,6 +278,7 @@ typedef struct {
     char name[64];
     int type;
     int isPointer;
+    int structTag;   /* valid iff type==TY_STRUCT */
     int isArray;
     int arrLen;
     int isParam;
@@ -227,23 +291,29 @@ extern int g_nfuncs;
 extern LSym g_locals[256];
 extern int g_nlocals;
 extern FnSym *g_curfn; /* NULL at file scope; set while compiling one function's body */
+extern StructDef g_structs[64];
+extern int g_nstructs;
 
 GSym *find_global(const char *name);
 FnSym *find_func(const char *name);
 LSym *find_local(const char *name);
 int is_builtin(const char *name);
-void register_local(const char *name, int type, int isPointer, int isArray,
-                     int arrLen, int isParam, int line);
+void register_local(const char *name, int type, int isPointer, int structTag,
+                     int isArray, int arrLen, int isParam, int line);
+int find_or_create_struct_tag(const char *name); /* index into g_structs, creating an incomplete entry if new */
+StructMember *find_struct_member(int structTag, const char *name, int line); /* fatal()s if not found */
+void require_complete_struct(int structTag, int line); /* fatal()s if the struct has no `{ members }` yet */
 
 /* A minimal type descriptor: just enough to know whether an
- * expression's value is a pointer, and to what base type, since
- * that's all pointer arithmetic scaling and the light type checks
- * need. Not a full type system - see infer_type()'s own comment in
- * symtab.c for what it deliberately doesn't try to do. */
-typedef struct { int base; int isPointer; } CType;
+ * expression's value is a pointer, and to what base type (and, for a
+ * struct, which one), since that's all pointer arithmetic scaling,
+ * struct member resolution, and the light type checks need. Not a
+ * full type system - see infer_type()'s own comment in symtab.c for
+ * what it deliberately doesn't try to do. */
+typedef struct { int base; int isPointer; int structTag; } CType;
 
 CType infer_type(Node *n);
-int var_width(int type, int isPointer); /* 1 or 2 bytes, for storage sizing */
+int var_width(int type, int isPointer, int structTag); /* size in bytes, for storage sizing */
 
 /* ===================================================================
  * Tokens produced by the lexer (owned by lexer.c; read by parser.c

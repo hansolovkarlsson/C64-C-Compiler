@@ -5,8 +5,8 @@ exact syntax your `c64asm.c` assembler expects. This is built
 incrementally: get a solid, verified minimal subset working first (a
 step-1 "int/char, no pointers" core), then add features on top of a
 foundation that's already known to generate correct code. Pointers,
-full function recursion, `#include`, and a small standard library are
-all in now; `struct`s are the likely next step.
+full function recursion, `#include`, a small standard library, and
+`struct` are all in now.
 
 The source is split into one file per compiler phase under `src/`,
 each with a substantial comment explaining what that phase does and
@@ -76,7 +76,7 @@ to approach the codebase for the first time:
 | `src/cc64.h` | Shared types and cross-module declarations; start here for the architecture overview |
 | `src/lexer.c` | Source text -> tokens, and `#include` splicing |
 | `src/ast.c` | The AST node constructor |
-| `src/symtab.c` | Symbol tables, plus the minimal type inference used for pointer arithmetic |
+| `src/symtab.c` | Symbol tables, `struct` layouts, plus the minimal type inference used for pointer arithmetic and member lookup |
 | `src/parser.c` | Recursive-descent parsing (tokens -> AST), and the two-pass driver (`pass_a`/`pass_b`) |
 | `src/codegen.c` | Shared codegen utilities: emitting a line of assembly, label generation |
 | `src/codegen_runtime.c` | The fixed 6502 runtime library (multiply, divide, comparisons, string printing) |
@@ -89,15 +89,18 @@ to approach the codebase for the first time:
 ## What's supported
 
 - **Types:** `int` (16-bit, signed), `char` (8-bit, **unsigned** - see
-  below), `void`, and single-level pointers to either (`int *`, `char *`).
+  below), `void`, single-level pointers to any of those (`int *`,
+  `char *`, `struct Tag *`), and `struct`.
 - **Declarations:** globals and locals, with an optional 1-D array
-  form (`int a[10];`, `char buf[40];`), and an optional constant
-  literal initializer for scalar (non-pointer) globals (`int x = 5;`,
-  `int y = -3;`). Array initializers and pointer initializers on
-  *globals* aren't supported yet (arrays start zero-filled; give a
-  pointer its value inside a function instead). Local pointer
-  declarations *can* have an initializer, including a string literal
-  (`char *s = "hi";`).
+  form (`int a[10];`, `char buf[40];`, `struct Point pts[10];`), and
+  an optional constant literal initializer for scalar (non-pointer,
+  non-struct) globals (`int x = 5;`, `int y = -3;`). Array,
+  pointer, and struct initializers on *globals* aren't supported yet
+  (arrays and structs start zero-filled; give a pointer its value
+  inside a function instead). Local pointer declarations *can* have
+  an initializer, including a string literal (`char *s = "hi";`) -
+  struct locals still can't, even though they're otherwise ordinary
+  local variables (see "struct" below).
 - **Functions:** typed parameters (including pointer parameters),
   typed return value (including pointer return types), forward calls
   in any order (any function can call any other regardless of which
@@ -121,6 +124,24 @@ to approach the codebase for the first time:
   Arrays decay to a pointer to their first element wherever a pointer
   is expected (passing an array as a function argument, assigning an
   array to a pointer variable, etc.).
+- **`struct`:** `struct Tag { int/char/pointer members; };`, parsed
+  and fully laid out (every member's byte offset, and the whole
+  struct's size) at the point it's declared - members are packed with
+  no padding, since this is a byte-addressed machine with no alignment
+  requirements to satisfy. `.` for direct access, `->` for access
+  through a pointer (parsed as sugar for `(*p).member`, so both share
+  one code path), `&s`/`&s.member`/`&p->member` for address-of, and
+  arrays of structs (`pts[i].x`) with both compile-time and runtime
+  indexing. Self-referential structs work (`struct Node { struct Node
+  *next; };`), and so do two structs that reference each other
+  regardless of which is written first in the file - see "How structs
+  work" below. **Structs are pointer-only across function boundaries**
+  (a parameter or return type must be `struct Tag *`, never `struct
+  Tag` by value) and **members must be `int`, `char`, or a pointer**
+  (never another struct held by value, and never an array) - both
+  deliberate scope boundaries for this step, not oversights, and both
+  give a clear compile-time error rather than silently doing the
+  wrong thing.
 - **Statements:** `if`/`else`, `while`, `for`, `break`, `continue`,
   `return`, blocks, local declarations (anywhere in a block), empty
   statement.
@@ -136,13 +157,17 @@ to approach the codebase for the first time:
   literal, a variable, a buffer you built at runtime, all walked at
   runtime up to the first zero byte), `peek(addr)`, `poke(addr, val)`.
 - **Light type checking:** the compiler doesn't do full C type
-  checking, but it does catch some common pointer mistakes at compile
-  time rather than letting them corrupt memory silently: dereferencing
-  a non-pointer, `pointer + pointer`, `int - pointer`, passing a
-  plain value where a function expects a pointer (or vice versa), and
-  returning a plain value from a function declared to return a
-  pointer (or vice versa). `0` is always accepted as a valid pointer
-  value ("null") in these checks.
+  checking, but it does catch some common mistakes at compile time
+  rather than letting them corrupt memory silently: dereferencing a
+  non-pointer, `pointer + pointer`, `int - pointer`, passing a plain
+  value where a function expects a pointer (or vice versa), returning
+  a plain value from a function declared to return a pointer (or vice
+  versa), using a struct by value where there's no single register-
+  sized value for it to go, `.` on a pointer or bare array (use `->`,
+  or index the array first), an unknown member name, and a struct used
+  by value before it's been fully defined (only pointers to an
+  incomplete struct are allowed - see "How structs work" below). `0`
+  is always accepted as a valid pointer value ("null") in these checks.
 - **`#include`**, both `"quoted"` (searched next to the including
   file, then falling back to the same path as angle brackets) and
   `<angle-bracket>` (searched via `-I` directories and an
@@ -159,13 +184,17 @@ to approach the codebase for the first time:
 
 Pointer-to-pointer, function pointers, arrays of pointers, array
 *parameters* written with `[]` syntax (use `type *name` instead - it
-receives exactly the same decayed pointer), `struct`/`union`,
-`typedef`s, multi-dimensional arrays, floating point, `do`/`while`,
-`switch`, and anything like `printf` (there's no variadic-function
-support, so no way to accept a runtime-variable number of arguments -
-`print_int`/`print_hex` in `lib/print.h` cover the common cases with
-fixed-arity calls instead). The preprocessor is limited to
-`#include` - no `#define`, no macros, no conditional compilation.
+receives exactly the same decayed pointer), by-value struct parameters
+and return values (use `struct Tag *` instead), struct members that
+are themselves a struct-by-value or an array, `union`, `typedef`s
+(so every struct variable/parameter needs the full `struct Tag`
+spelled out - no bare `Tag` after a `typedef struct Tag Tag;`),
+multi-dimensional arrays, floating point, `do`/`while`, `switch`, and
+anything like `printf` (there's no variadic-function support, so no
+way to accept a runtime-variable number of arguments - `print_int`/
+`print_hex` in `lib/print.h` cover the common cases with fixed-arity
+calls instead). The preprocessor is limited to `#include` - no
+`#define`, no macros, no conditional compilation.
 
 ## Design notes
 
@@ -210,6 +239,55 @@ A software *operand* stack is still used for evaluating nested
 expressions (`a * (b + c)` etc.), exactly as before - it's
 independent of the call-frame machinery, though as noted above the
 two now interact when an operand is held across a recursive call.
+
+### How structs work
+
+A `struct Tag { ... }` is parsed and fully laid out (every member's
+byte offset, and the whole struct's total size) entirely while
+scanning declarations, before any function body is really parsed -
+member declarations are just a list, with no expressions or
+statements that would need deferring. Members are restricted to
+`char`, `int`, and pointers - never another struct held by value, and
+never an array - specifically so this layout computation stays simple:
+no padding or alignment to reason about either, since this is a
+byte-addressed 8-bit machine where every type's size is exactly 1 or
+2 bytes.
+
+A struct *variable* is nothing exotic once it's declared - just a
+fixed-size block of memory at one address, the same way an array
+already was. `structVar.member` compiles to "load from that address
+plus this member's fixed offset", which for a global or local struct
+(a compile-time-known address) is exactly as cheap as accessing any
+other plain variable - no runtime indirection at all. `p->member` (or
+the equivalent `(*p).member` - the parser desugars `->` into that
+form directly, so codegen only ever handles one shape) is the one
+case that genuinely needs a runtime address computation, and it
+reuses the exact same `__zpAP`-based machinery pointer dereferencing
+and array indexing already needed - a struct member reached through a
+pointer or an array is really just "the usual indirect access, plus a
+constant offset added on top."
+
+Self-referential structs (`struct Node { int val; struct Node *next;
+};`) and structs that reference each other regardless of which is
+written first work because a `struct Tag` name is resolved to an
+entry in the struct table the moment it's *seen* - creating an
+incomplete placeholder entry if that's the first time - rather than
+requiring the tag to already be fully defined. A pointer to a struct
+never needs to know that struct's size (a pointer is always 2 bytes
+no matter what it points to), so `struct Node *next;` inside `Node`'s
+own body works even though `Node` itself isn't finished being defined
+yet. Only *using* a struct by value - a variable of that type, which
+needs a known size to allocate storage for - requires it to be fully
+defined by that point; see `find_or_create_struct_tag()`'s comment in
+`src/symtab.c` for the full mechanism.
+
+**Structs are pointer-only across function boundaries** (parameters
+and return values must be `struct Tag *`) rather than supporting
+by-value passing. Real C supports both; by-value would mean copying
+the whole struct at every call boundary, which is genuine additional
+machinery for a pattern (linked lists, trees, anything built with
+`->`) that pointer-passing already covers naturally - shipping that
+first, cleanly, seemed better than shipping both halfway.
 
 ### Two-pass compilation
 
@@ -383,16 +461,25 @@ across the two files - directly, repeated, and via a nested include -
 and must not cause a redefinition error), and exercises every
 function in `lib/string.h` and `lib/print.h`, including the
 sign-extension edge cases in `print_hex` (checked at `-1` and `-4096`,
-not just positive values). `tests/forward.c` checks that
+not just positive values). `tests/structs.c` covers direct struct
+member access on locals and globals (both the compile-time
+"label+offset" fast path), `->` through a pointer, `&s.member`/
+`&p->member`/`&arr[i].member` (address of a member, not the whole
+struct/element), struct parameters and pointer returns, arrays of
+structs with both constant and runtime indexing, a self-referential
+linked list summed both iteratively and recursively, two structs that
+reference each other despite being declared in the "wrong" order for
+a naive one-pass compiler, and mixed-width members (`char`+`int`+
+pointer) to check offset computation. `tests/forward.c` checks that
 forward/backward call references both work regardless of declaration
 order. `tests/hello.c` is the basic smoke test for the whole pipeline
 (BASIC stub, zero-page init, stack init, `puts`/`putchar`, PETSCII
 case mapping).
 
-Run all six:
+Run all seven:
 
 ```sh
-for f in hello features forward pointers recursion include; do
+for f in hello features forward pointers recursion include structs; do
     ./cc64 tests/$f.c -o tests/$f.asm
     ./c64asm tests/$f.asm -o tests/$f.prg --listing tests/$f.lst
     python3 mini6502.py tests/$f.prg tests/$f.lst
@@ -412,7 +499,11 @@ done
    entirely in the lexer (see "HOW #include WORKS" in `src/cc64.h`),
    which meant zero changes to parsing or codegen; `lib/string.h` and
    `lib/print.h` are ordinary cc64 programs that happen to be headers.
-4. `struct`s (a natural pairing with pointers).
+4. ~~`struct`~~ - done, pointer-only across function boundaries (see
+   "How structs work" above) rather than also supporting by-value
+   passing, which would need real struct-copying machinery at every
+   call boundary for comparatively little added benefit given
+   pointers already cover the common linked-structure use cases.
 5. `do`/`while`, `switch`.
 6. Real `printf`-lite - blocked on variadic function support, which
    is a real calling-convention feature (not just a library

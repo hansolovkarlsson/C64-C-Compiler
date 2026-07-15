@@ -149,7 +149,7 @@ static void do_include(const char *fname, int angled, const char *base_dir, int 
  * whether it's really a keyword (T_IF, T_WHILE, ...) or a plain
  * T_IDENT that the parser will look up in a symbol table later. */
 static struct { const char *kw; TokKind k; } keywords[] = {
-    {"int", T_INT}, {"char", T_CHAR}, {"void", T_VOID},
+    {"int", T_INT}, {"char", T_CHAR}, {"void", T_VOID}, {"struct", T_STRUCT},
     {"if", T_IF}, {"else", T_ELSE}, {"while", T_WHILE}, {"for", T_FOR},
     {"return", T_RETURN}, {"break", T_BREAK}, {"continue", T_CONTINUE},
     {NULL, T_EOF}
@@ -370,6 +370,7 @@ static int lex_string(const char *src, const char *base_dir) {
         if (TWO('^','=',T_CARETEQ)) { tok_push(t); continue; }
         if (TWO('+','+',T_INC)) { tok_push(t); continue; }
         if (TWO('-','-',T_DEC)) { tok_push(t); continue; }
+        if (TWO('-','>',T_ARROW)) { tok_push(t); continue; }
 #undef TWO
 #undef THREE
 
@@ -383,6 +384,7 @@ static int lex_string(const char *src, const char *base_dir) {
             case ']': t.kind = T_RBRACKET; break;
             case ';': t.kind = T_SEMI; break;
             case ',': t.kind = T_COMMA; break;
+            case '.': t.kind = T_DOT; break;
             case '=': t.kind = T_ASSIGN; break;
             case '+': t.kind = T_PLUS; break;
             case '-': t.kind = T_MINUS; break;

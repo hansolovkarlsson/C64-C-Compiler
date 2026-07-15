@@ -146,7 +146,7 @@ void emit_global_storage(void) {
         GSym *g = &g_globals[i];
         char lbl[96]; global_label(lbl, sizeof(lbl), g->name);
         if (g->isArray) {
-            int bytes = g->arrLen * (g->type == TY_INT ? 2 : 1); /* arrays of pointers not supported */
+            int bytes = g->arrLen * var_width(g->type, 0, g->structTag); /* arrays of pointers not supported */
             emit("%s:", lbl);
             emit("    .fill %d, 0", bytes);
         } else if (g->hasInit) {
@@ -155,7 +155,7 @@ void emit_global_storage(void) {
             else emit("    .byte %ld", g->initVal & 0xFF ? (g->initVal & 0xFF) : 0);
         } else {
             emit("%s:", lbl);
-            emit("    .fill %d, 0", var_width(g->type, g->isPointer));
+            emit("    .fill %d, 0", var_width(g->type, g->isPointer, g->structTag));
         }
     }
     emit(" ");
@@ -230,7 +230,7 @@ void emit_function(FnSym *fn, Node *body) {
     emit("__fn_%s_frame:", fn->name);
     for (int i = 0; i < fn->nparams; i++) {
         char lbl[96]; local_label(lbl, sizeof(lbl), fn->name, fn->paramNames[i]);
-        int w = var_width(fn->paramTypes[i], fn->paramIsPointer[i]);
+        int w = var_width(fn->paramTypes[i], fn->paramIsPointer[i], fn->paramStructTag[i]);
         emit("%s:", lbl);
         emit("    .fill %d, 0", w);
         total += w;
@@ -239,8 +239,8 @@ void emit_function(FnSym *fn, Node *body) {
         if (g_locals[i].isParam) continue;
         char lbl[96]; local_label(lbl, sizeof(lbl), fn->name, g_locals[i].name);
         int w = g_locals[i].isArray
-            ? g_locals[i].arrLen * (g_locals[i].type == TY_INT ? 2 : 1) /* arrays of pointers not supported */
-            : var_width(g_locals[i].type, g_locals[i].isPointer);
+            ? g_locals[i].arrLen * var_width(g_locals[i].type, 0, g_locals[i].structTag) /* arrays of pointers not supported */
+            : var_width(g_locals[i].type, g_locals[i].isPointer, g_locals[i].structTag);
         emit("%s:", lbl);
         emit("    .fill %d, 0", w);
         total += w;
