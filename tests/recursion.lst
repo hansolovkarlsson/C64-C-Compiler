@@ -1,0 +1,2613 @@
+; c64asm listing  (origin $0801, 9984 bytes)
+
+080D  A9 0E         LDA #14           ; switch to the lower/upper character set - required
+080F  20 D2 FF      JSR __CHROUT      ; for the PETSCII case mapping below to render as letters
+0812  A9 00         LDA #0
+0814  8D 25 08      STA __rt_spidx
+0817  A9 01         LDA #<__rt_cstack ; call-stack pointer starts at the base of its buffer -
+0819  8D 26 08      STA __rt_csp      ; see codegen_stmt.c's emit_function() for how each
+081C  A9 1F         LDA #>__rt_cstack ; function's push/popframe routines use it to support
+081E  8D 27 08      STA __rt_csp+1    ; recursion despite locals/params living at fixed addresses
+0821  20 BE 18      JSR __fn_main
+0824  60            RTS
+082C  AE 25 08      LDX __rt_spidx
+082F  A5 FB         LDA __zpR
+0831  9D 01 1E      STA __rt_stack,X
+0834  A5 FC         LDA __zpR+1
+0836  9D 02 1E      STA __rt_stack+1,X
+0839  E8            INX
+083A  E8            INX
+083B  8E 25 08      STX __rt_spidx
+083E  D0 0E         BNE __rt_push_ok
+0840  A9 93         LDA #<__str_1
+0842  85 FB         STA __zpR
+0844  A9 1D         LDA #>__str_1
+0846  85 FC         STA __zpR+1
+0848  20 C1 0A      JSR __rt_puts
+084B  4C 4B 08      JMP __rt_push_halt
+084E  60            RTS
+084F  AE 25 08      LDX __rt_spidx
+0852  CA            DEX
+0853  CA            DEX
+0854  BD 01 1E      LDA __rt_stack,X
+0857  85 FD         STA __zpR2
+0859  BD 02 1E      LDA __rt_stack+1,X
+085C  85 FE         STA __zpR2+1
+085E  8E 25 08      STX __rt_spidx
+0861  60            RTS
+0862  BA            TSX
+0863  E0 20         CPX #$20
+0865  90 12         BCC __rt_csc_overflow
+0867  AD 27 08      LDA __rt_csp+1
+086A  C9 2F         CMP #>(__rt_cstack+4096)
+086C  90 19         BCC __rt_csc_ok
+086E  D0 09         BNE __rt_csc_overflow
+0870  AD 26 08      LDA __rt_csp
+0873  C9 01         CMP #<(__rt_cstack+4096)
+0875  90 10         BCC __rt_csc_ok
+0877  F0 0E         BEQ __rt_csc_ok
+0879  A9 3E         LDA #<__str_0
+087B  85 FB         STA __zpR
+087D  A9 1D         LDA #>__str_0
+087F  85 FC         STA __zpR+1
+0881  20 C1 0A      JSR __rt_puts
+0884  4C 84 08      JMP __rt_csc_halt
+0887  60            RTS
+0888  A9 00         LDA #0
+088A  8D 2A 08      STA __zpT0
+088D  8D 2B 08      STA __zpT0+1
+0890  A2 10         LDX #16
+0892  46 FC         LSR __zpR+1
+0894  66 FB         ROR __zpR
+0896  90 11         BCC __rt_mul16_noadd
+0898  18            CLC
+0899  AD 2A 08      LDA __zpT0
+089C  65 FD         ADC __zpR2
+089E  8D 2A 08      STA __zpT0
+08A1  AD 2B 08      LDA __zpT0+1
+08A4  65 FE         ADC __zpR2+1
+08A6  8D 2B 08      STA __zpT0+1
+08A9  06 FD         ASL __zpR2
+08AB  26 FE         ROL __zpR2+1
+08AD  CA            DEX
+08AE  D0 E2         BNE __rt_mul16_loop
+08B0  AD 2A 08      LDA __zpT0
+08B3  85 FB         STA __zpR
+08B5  AD 2B 08      LDA __zpT0+1
+08B8  85 FC         STA __zpR+1
+08BA  60            RTS
+08BB  A9 00         LDA #0
+08BD  8D 2A 08      STA __zpT0
+08C0  8D 2B 08      STA __zpT0+1
+08C3  A2 10         LDX #16
+08C5  06 FD         ASL __zpR2
+08C7  26 FE         ROL __zpR2+1
+08C9  2E 2A 08      ROL __zpT0
+08CC  2E 2B 08      ROL __zpT0+1
+08CF  AD 2A 08      LDA __zpT0
+08D2  38            SEC
+08D3  E5 FB         SBC __zpR
+08D5  A8            TAY
+08D6  AD 2B 08      LDA __zpT0+1
+08D9  E5 FC         SBC __zpR+1
+08DB  90 08         BCC __rt_udiv16_skip
+08DD  8D 2B 08      STA __zpT0+1
+08E0  8C 2A 08      STY __zpT0
+08E3  E6 FD         INC __zpR2
+08E5  CA            DEX
+08E6  D0 DD         BNE __rt_udiv16_loop
+08E8  60            RTS
+08E9  38            SEC
+08EA  A9 00         LDA #0
+08EC  E5 FD         SBC __zpR2
+08EE  AA            TAX
+08EF  A9 00         LDA #0
+08F1  E5 FE         SBC __zpR2+1
+08F3  85 FE         STA __zpR2+1
+08F5  86 FD         STX __zpR2
+08F7  60            RTS
+08F8  38            SEC
+08F9  A9 00         LDA #0
+08FB  E5 FB         SBC __zpR
+08FD  AA            TAX
+08FE  A9 00         LDA #0
+0900  E5 FC         SBC __zpR+1
+0902  85 FC         STA __zpR+1
+0904  86 FB         STX __zpR
+0906  60            RTS
+0907  38            SEC
+0908  A9 00         LDA #0
+090A  ED 2A 08      SBC __zpT0
+090D  AA            TAX
+090E  A9 00         LDA #0
+0910  ED 2B 08      SBC __zpT0+1
+0913  8D 2B 08      STA __zpT0+1
+0916  8E 2A 08      STX __zpT0
+0919  60            RTS
+091A  A9 00         LDA #0
+091C  8D 28 08      STA __zpT1
+091F  8D 29 08      STA __zpT1+1
+0922  A5 FE         LDA __zpR2+1
+0924  10 06         BPL __rt_sdm_d1
+0926  20 E9 08      JSR __rt_neg_r2
+0929  EE 28 08      INC __zpT1
+092C  A5 FC         LDA __zpR+1
+092E  10 06         BPL __rt_sdm_d2
+0930  20 F8 08      JSR __rt_neg_r
+0933  EE 29 08      INC __zpT1+1
+0936  20 BB 08      JSR __rt_udiv16
+0939  AD 28 08      LDA __zpT1
+093C  4D 29 08      EOR __zpT1+1
+093F  29 01         AND #1
+0941  F0 03         BEQ __rt_sdm_qdone
+0943  20 E9 08      JSR __rt_neg_r2
+0946  AD 28 08      LDA __zpT1
+0949  F0 03         BEQ __rt_sdm_rdone
+094B  20 07 09      JSR __rt_neg_t0
+094E  60            RTS
+094F  A5 FD         LDA __zpR2
+0951  C5 FB         CMP __zpR
+0953  D0 0F         BNE __rt_eq16_ne
+0955  A5 FE         LDA __zpR2+1
+0957  C5 FC         CMP __zpR+1
+0959  D0 09         BNE __rt_eq16_ne
+095B  A9 01         LDA #1
+095D  85 FB         STA __zpR
+095F  A9 00         LDA #0
+0961  85 FC         STA __zpR+1
+0963  60            RTS
+0964  A9 00         LDA #0
+0966  85 FB         STA __zpR
+0968  85 FC         STA __zpR+1
+096A  60            RTS
+096B  A5 FD         LDA __zpR2
+096D  C5 FB         CMP __zpR
+096F  D0 0D         BNE __rt_ne16_ne
+0971  A5 FE         LDA __zpR2+1
+0973  C5 FC         CMP __zpR+1
+0975  D0 07         BNE __rt_ne16_ne
+0977  A9 00         LDA #0
+0979  85 FB         STA __zpR
+097B  85 FC         STA __zpR+1
+097D  60            RTS
+097E  A9 01         LDA #1
+0980  85 FB         STA __zpR
+0982  A9 00         LDA #0
+0984  85 FC         STA __zpR+1
+0986  60            RTS
+0987  38            SEC
+0988  A5 FD         LDA __zpR2
+098A  E5 FB         SBC __zpR
+098C  A5 FE         LDA __zpR2+1
+098E  E5 FC         SBC __zpR+1
+0990  50 02         BVC __rt_sub_r2r_ok
+0992  49 80         EOR #$80
+0994  60            RTS
+0995  38            SEC
+0996  A5 FB         LDA __zpR
+0998  E5 FD         SBC __zpR2
+099A  A5 FC         LDA __zpR+1
+099C  E5 FE         SBC __zpR2+1
+099E  50 02         BVC __rt_sub_rr2_ok
+09A0  49 80         EOR #$80
+09A2  60            RTS
+09A3  20 87 09      JSR __rt_sub_r2r
+09A6  30 07         BMI __rt_lt16_t
+09A8  A9 00         LDA #0
+09AA  85 FB         STA __zpR
+09AC  85 FC         STA __zpR+1
+09AE  60            RTS
+09AF  A9 01         LDA #1
+09B1  85 FB         STA __zpR
+09B3  A9 00         LDA #0
+09B5  85 FC         STA __zpR+1
+09B7  60            RTS
+09B8  20 87 09      JSR __rt_sub_r2r
+09BB  10 07         BPL __rt_ge16_t
+09BD  A9 00         LDA #0
+09BF  85 FB         STA __zpR
+09C1  85 FC         STA __zpR+1
+09C3  60            RTS
+09C4  A9 01         LDA #1
+09C6  85 FB         STA __zpR
+09C8  A9 00         LDA #0
+09CA  85 FC         STA __zpR+1
+09CC  60            RTS
+09CD  20 95 09      JSR __rt_sub_rr2
+09D0  30 07         BMI __rt_gt16_t
+09D2  A9 00         LDA #0
+09D4  85 FB         STA __zpR
+09D6  85 FC         STA __zpR+1
+09D8  60            RTS
+09D9  A9 01         LDA #1
+09DB  85 FB         STA __zpR
+09DD  A9 00         LDA #0
+09DF  85 FC         STA __zpR+1
+09E1  60            RTS
+09E2  20 95 09      JSR __rt_sub_rr2
+09E5  10 07         BPL __rt_le16_t
+09E7  A9 00         LDA #0
+09E9  85 FB         STA __zpR
+09EB  85 FC         STA __zpR+1
+09ED  60            RTS
+09EE  A9 01         LDA #1
+09F0  85 FB         STA __zpR
+09F2  A9 00         LDA #0
+09F4  85 FC         STA __zpR+1
+09F6  60            RTS
+09F7  A6 FB         LDX __zpR
+09F9  A5 FD         LDA __zpR2
+09FB  85 FB         STA __zpR
+09FD  A5 FE         LDA __zpR2+1
+09FF  85 FC         STA __zpR+1
+0A01  E0 00         CPX #0
+0A03  F0 08         BEQ __rt_shl16_done
+0A05  06 FB         ASL __zpR
+0A07  26 FC         ROL __zpR+1
+0A09  CA            DEX
+0A0A  4C 01 0A      JMP __rt_shl16_loop
+0A0D  60            RTS
+0A0E  A6 FB         LDX __zpR
+0A10  A5 FD         LDA __zpR2
+0A12  85 FB         STA __zpR
+0A14  A5 FE         LDA __zpR2+1
+0A16  85 FC         STA __zpR+1
+0A18  E0 00         CPX #0
+0A1A  F0 0C         BEQ __rt_shr16_done
+0A1C  A5 FC         LDA __zpR+1
+0A1E  C9 80         CMP #$80
+0A20  66 FC         ROR __zpR+1
+0A22  66 FB         ROR __zpR
+0A24  CA            DEX
+0A25  4C 18 0A      JMP __rt_shr16_loop
+0A28  60            RTS
+0A29  A5 FB         LDA __zpR
+0A2B  C9 61         CMP #$61
+0A2D  90 0C         BCC __rt_tp_notlower
+0A2F  C9 7B         CMP #$7B
+0A31  B0 08         BCS __rt_tp_notlower
+0A33  38            SEC
+0A34  E9 20         SBC #$20
+0A36  85 FB         STA __zpR
+0A38  4C 48 0A      JMP __rt_tp_done
+0A3B  C9 41         CMP #$41
+0A3D  90 09         BCC __rt_tp_done
+0A3F  C9 5B         CMP #$5B
+0A41  B0 05         BCS __rt_tp_done
+0A43  18            CLC
+0A44  69 80         ADC #$80
+0A46  85 FB         STA __zpR
+0A48  60            RTS
+0A49  A5 FE         LDA __zpR2+1
+0A4B  C5 FC         CMP __zpR+1
+0A4D  90 0F         BCC __rt_ult16_t
+0A4F  D0 06         BNE __rt_ult16_f
+0A51  A5 FD         LDA __zpR2
+0A53  C5 FB         CMP __zpR
+0A55  90 07         BCC __rt_ult16_t
+0A57  A9 00         LDA #0
+0A59  85 FB         STA __zpR
+0A5B  85 FC         STA __zpR+1
+0A5D  60            RTS
+0A5E  A9 01         LDA #1
+0A60  85 FB         STA __zpR
+0A62  A9 00         LDA #0
+0A64  85 FC         STA __zpR+1
+0A66  60            RTS
+0A67  A5 FC         LDA __zpR+1
+0A69  C5 FE         CMP __zpR2+1
+0A6B  90 0F         BCC __rt_ugt16_t
+0A6D  D0 06         BNE __rt_ugt16_f
+0A6F  A5 FB         LDA __zpR
+0A71  C5 FD         CMP __zpR2
+0A73  90 07         BCC __rt_ugt16_t
+0A75  A9 00         LDA #0
+0A77  85 FB         STA __zpR
+0A79  85 FC         STA __zpR+1
+0A7B  60            RTS
+0A7C  A9 01         LDA #1
+0A7E  85 FB         STA __zpR
+0A80  A9 00         LDA #0
+0A82  85 FC         STA __zpR+1
+0A84  60            RTS
+0A85  A5 FC         LDA __zpR+1
+0A87  C5 FE         CMP __zpR2+1
+0A89  90 11         BCC __rt_ule16_f
+0A8B  D0 06         BNE __rt_ule16_t
+0A8D  A5 FB         LDA __zpR
+0A8F  C5 FD         CMP __zpR2
+0A91  90 09         BCC __rt_ule16_f
+0A93  A9 01         LDA #1
+0A95  85 FB         STA __zpR
+0A97  A9 00         LDA #0
+0A99  85 FC         STA __zpR+1
+0A9B  60            RTS
+0A9C  A9 00         LDA #0
+0A9E  85 FB         STA __zpR
+0AA0  85 FC         STA __zpR+1
+0AA2  60            RTS
+0AA3  A5 FE         LDA __zpR2+1
+0AA5  C5 FC         CMP __zpR+1
+0AA7  90 11         BCC __rt_uge16_f
+0AA9  D0 06         BNE __rt_uge16_t
+0AAB  A5 FD         LDA __zpR2
+0AAD  C5 FB         CMP __zpR
+0AAF  90 09         BCC __rt_uge16_f
+0AB1  A9 01         LDA #1
+0AB3  85 FB         STA __zpR
+0AB5  A9 00         LDA #0
+0AB7  85 FC         STA __zpR+1
+0AB9  60            RTS
+0ABA  A9 00         LDA #0
+0ABC  85 FB         STA __zpR
+0ABE  85 FC         STA __zpR+1
+0AC0  60            RTS
+0AC1  A5 FB         LDA __zpR
+0AC3  85 02         STA __zpAP
+0AC5  A5 FC         LDA __zpR+1
+0AC7  85 03         STA __zpAP+1
+0AC9  A0 00         LDY #0
+0ACB  B1 02         LDA (__zpAP),Y
+0ACD  F0 1A         BEQ __rt_puts_done
+0ACF  85 FB         STA __zpR
+0AD1  20 29 0A      JSR __rt_topetscii
+0AD4  A5 FB         LDA __zpR
+0AD6  20 D2 FF      JSR __CHROUT
+0AD9  18            CLC
+0ADA  A5 02         LDA __zpAP
+0ADC  69 01         ADC #1
+0ADE  85 02         STA __zpAP
+0AE0  A5 03         LDA __zpAP+1
+0AE2  69 00         ADC #0
+0AE4  85 03         STA __zpAP+1
+0AE6  4C C9 0A      JMP __rt_puts_loop
+0AE9  60            RTS
+0B06  AD 26 08      LDA __rt_csp
+0B09  85 02         STA __zpAP
+0B0B  AD 27 08      LDA __rt_csp+1
+0B0E  85 03         STA __zpAP+1
+0B10  A0 00         LDY #0
+0B12  B9 FC 0A      LDA __fn_print_uint_frame,Y
+0B15  91 02         STA (__zpAP),Y
+0B17  C8            INY
+0B18  C0 0A         CPY #10
+0B1A  D0 F6         BNE __fn_print_uint_pushfr_loop
+0B1C  18            CLC
+0B1D  AD 26 08      LDA __rt_csp
+0B20  69 0A         ADC #10
+0B22  8D 26 08      STA __rt_csp
+0B25  AD 27 08      LDA __rt_csp+1
+0B28  69 00         ADC #0
+0B2A  8D 27 08      STA __rt_csp+1
+0B2D  4C 62 08      JMP __rt_cstack_check
+0B30  38            SEC
+0B31  AD 26 08      LDA __rt_csp
+0B34  E9 0A         SBC #10
+0B36  8D 26 08      STA __rt_csp
+0B39  85 02         STA __zpAP
+0B3B  AD 27 08      LDA __rt_csp+1
+0B3E  E9 00         SBC #0
+0B40  8D 27 08      STA __rt_csp+1
+0B43  85 03         STA __zpAP+1
+0B45  A0 00         LDY #0
+0B47  B1 02         LDA (__zpAP),Y
+0B49  99 FC 0A      STA __fn_print_uint_frame,Y
+0B4C  C8            INY
+0B4D  C0 0A         CPY #10
+0B4F  D0 F6         BNE __fn_print_uint_popfr_loop
+0B51  60            RTS
+0B52  AD FC 0A      LDA __fn_print_uint_v_n
+0B55  85 FB         STA __zpR
+0B57  AD FD 0A      LDA __fn_print_uint_v_n+1
+0B5A  85 FC         STA __zpR+1
+0B5C  20 2C 08      JSR __rt_push
+0B5F  A9 00         LDA #<0
+0B61  85 FB         STA __zpR
+0B63  A9 00         LDA #>0
+0B65  85 FC         STA __zpR+1
+0B67  20 4F 08      JSR __rt_pop2
+0B6A  20 4F 09      JSR __rt_eq16
+0B6D  A5 FB         LDA __zpR
+0B6F  05 FC         ORA __zpR+1
+0B71  D0 03         BNE __L2
+0B73  4C 8A 0B      JMP __L0
+0B76  A9 30         LDA #<48
+0B78  85 FB         STA __zpR
+0B7A  A9 00         LDA #>48
+0B7C  85 FC         STA __zpR+1
+0B7E  20 29 0A      JSR __rt_topetscii
+0B81  A5 FB         LDA __zpR
+0B83  20 D2 FF      JSR __CHROUT
+0B86  60            RTS
+0B87  4C 8A 0B      JMP __L1
+0B8A  A9 00         LDA #<0
+0B8C  85 FB         STA __zpR
+0B8E  A9 00         LDA #>0
+0B90  85 FC         STA __zpR+1
+0B92  A5 FB         LDA __zpR
+0B94  8D 04 0B      STA __fn_print_uint_v_i
+0B97  A5 FC         LDA __zpR+1
+0B99  8D 05 0B      STA __fn_print_uint_v_i+1
+0B9C  AD FC 0A      LDA __fn_print_uint_v_n
+0B9F  85 FB         STA __zpR
+0BA1  AD FD 0A      LDA __fn_print_uint_v_n+1
+0BA4  85 FC         STA __zpR+1
+0BA6  20 2C 08      JSR __rt_push
+0BA9  A9 00         LDA #<0
+0BAB  85 FB         STA __zpR
+0BAD  A9 00         LDA #>0
+0BAF  85 FC         STA __zpR+1
+0BB1  20 4F 08      JSR __rt_pop2
+0BB4  20 CD 09      JSR __rt_gt16
+0BB7  A5 FB         LDA __zpR
+0BB9  05 FC         ORA __zpR+1
+0BBB  D0 03         BNE __L5
+0BBD  4C 77 0C      JMP __L4
+0BC0  AD 04 0B      LDA __fn_print_uint_v_i
+0BC3  85 FB         STA __zpR
+0BC5  AD 05 0B      LDA __fn_print_uint_v_i+1
+0BC8  85 FC         STA __zpR+1
+0BCA  18            CLC
+0BCB  A5 FB         LDA __zpR
+0BCD  69 FE         ADC #<__fn_print_uint_v_buf
+0BCF  85 02         STA __zpAP
+0BD1  A5 FC         LDA __zpR+1
+0BD3  69 0A         ADC #>__fn_print_uint_v_buf
+0BD5  85 03         STA __zpAP+1
+0BD7  A5 02         LDA __zpAP
+0BD9  85 FB         STA __zpR
+0BDB  A5 03         LDA __zpAP+1
+0BDD  85 FC         STA __zpR+1
+0BDF  20 2C 08      JSR __rt_push
+0BE2  AD FC 0A      LDA __fn_print_uint_v_n
+0BE5  85 FB         STA __zpR
+0BE7  AD FD 0A      LDA __fn_print_uint_v_n+1
+0BEA  85 FC         STA __zpR+1
+0BEC  20 2C 08      JSR __rt_push
+0BEF  A9 0A         LDA #<10
+0BF1  85 FB         STA __zpR
+0BF3  A9 00         LDA #>10
+0BF5  85 FC         STA __zpR+1
+0BF7  20 4F 08      JSR __rt_pop2
+0BFA  20 1A 09      JSR __rt_sdivmod16
+0BFD  AD 2A 08      LDA __zpT0
+0C00  85 FB         STA __zpR
+0C02  AD 2B 08      LDA __zpT0+1
+0C05  85 FC         STA __zpR+1
+0C07  20 4F 08      JSR __rt_pop2
+0C0A  A5 FD         LDA __zpR2
+0C0C  85 02         STA __zpAP
+0C0E  A5 FE         LDA __zpR2+1
+0C10  85 03         STA __zpAP+1
+0C12  A0 00         LDY #0
+0C14  A5 FB         LDA __zpR
+0C16  91 02         STA (__zpAP),Y
+0C18  AD FC 0A      LDA __fn_print_uint_v_n
+0C1B  85 FB         STA __zpR
+0C1D  AD FD 0A      LDA __fn_print_uint_v_n+1
+0C20  85 FC         STA __zpR+1
+0C22  20 2C 08      JSR __rt_push
+0C25  A9 0A         LDA #<10
+0C27  85 FB         STA __zpR
+0C29  A9 00         LDA #>10
+0C2B  85 FC         STA __zpR+1
+0C2D  20 4F 08      JSR __rt_pop2
+0C30  20 1A 09      JSR __rt_sdivmod16
+0C33  A5 FD         LDA __zpR2
+0C35  85 FB         STA __zpR
+0C37  A5 FE         LDA __zpR2+1
+0C39  85 FC         STA __zpR+1
+0C3B  A5 FB         LDA __zpR
+0C3D  8D FC 0A      STA __fn_print_uint_v_n
+0C40  A5 FC         LDA __zpR+1
+0C42  8D FD 0A      STA __fn_print_uint_v_n+1
+0C45  AD 04 0B      LDA __fn_print_uint_v_i
+0C48  85 FB         STA __zpR
+0C4A  AD 05 0B      LDA __fn_print_uint_v_i+1
+0C4D  85 FC         STA __zpR+1
+0C4F  20 2C 08      JSR __rt_push
+0C52  A9 01         LDA #<1
+0C54  85 FB         STA __zpR
+0C56  A9 00         LDA #>1
+0C58  85 FC         STA __zpR+1
+0C5A  20 4F 08      JSR __rt_pop2
+0C5D  18            CLC
+0C5E  A5 FD         LDA __zpR2
+0C60  65 FB         ADC __zpR
+0C62  85 FB         STA __zpR
+0C64  A5 FE         LDA __zpR2+1
+0C66  65 FC         ADC __zpR+1
+0C68  85 FC         STA __zpR+1
+0C6A  A5 FB         LDA __zpR
+0C6C  8D 04 0B      STA __fn_print_uint_v_i
+0C6F  A5 FC         LDA __zpR+1
+0C71  8D 05 0B      STA __fn_print_uint_v_i+1
+0C74  4C 9C 0B      JMP __L3
+0C77  AD 04 0B      LDA __fn_print_uint_v_i
+0C7A  85 FB         STA __zpR
+0C7C  AD 05 0B      LDA __fn_print_uint_v_i+1
+0C7F  85 FC         STA __zpR+1
+0C81  20 2C 08      JSR __rt_push
+0C84  A9 00         LDA #<0
+0C86  85 FB         STA __zpR
+0C88  A9 00         LDA #>0
+0C8A  85 FC         STA __zpR+1
+0C8C  20 4F 08      JSR __rt_pop2
+0C8F  20 CD 09      JSR __rt_gt16
+0C92  A5 FB         LDA __zpR
+0C94  05 FC         ORA __zpR+1
+0C96  D0 03         BNE __L8
+0C98  4C 15 0D      JMP __L7
+0C9B  AD 04 0B      LDA __fn_print_uint_v_i
+0C9E  85 FB         STA __zpR
+0CA0  AD 05 0B      LDA __fn_print_uint_v_i+1
+0CA3  85 FC         STA __zpR+1
+0CA5  20 2C 08      JSR __rt_push
+0CA8  A9 01         LDA #<1
+0CAA  85 FB         STA __zpR
+0CAC  A9 00         LDA #>1
+0CAE  85 FC         STA __zpR+1
+0CB0  20 4F 08      JSR __rt_pop2
+0CB3  38            SEC
+0CB4  A5 FD         LDA __zpR2
+0CB6  E5 FB         SBC __zpR
+0CB8  85 FD         STA __zpR2
+0CBA  A5 FE         LDA __zpR2+1
+0CBC  E5 FC         SBC __zpR+1
+0CBE  85 FC         STA __zpR+1
+0CC0  A5 FD         LDA __zpR2
+0CC2  85 FB         STA __zpR
+0CC4  A5 FB         LDA __zpR
+0CC6  8D 04 0B      STA __fn_print_uint_v_i
+0CC9  A5 FC         LDA __zpR+1
+0CCB  8D 05 0B      STA __fn_print_uint_v_i+1
+0CCE  AD 04 0B      LDA __fn_print_uint_v_i
+0CD1  85 FB         STA __zpR
+0CD3  AD 05 0B      LDA __fn_print_uint_v_i+1
+0CD6  85 FC         STA __zpR+1
+0CD8  18            CLC
+0CD9  A5 FB         LDA __zpR
+0CDB  69 FE         ADC #<__fn_print_uint_v_buf
+0CDD  85 02         STA __zpAP
+0CDF  A5 FC         LDA __zpR+1
+0CE1  69 0A         ADC #>__fn_print_uint_v_buf
+0CE3  85 03         STA __zpAP+1
+0CE5  A0 00         LDY #0
+0CE7  B1 02         LDA (__zpAP),Y
+0CE9  85 FB         STA __zpR
+0CEB  A9 00         LDA #0
+0CED  85 FC         STA __zpR+1
+0CEF  20 2C 08      JSR __rt_push
+0CF2  A9 30         LDA #<48
+0CF4  85 FB         STA __zpR
+0CF6  A9 00         LDA #>48
+0CF8  85 FC         STA __zpR+1
+0CFA  20 4F 08      JSR __rt_pop2
+0CFD  18            CLC
+0CFE  A5 FD         LDA __zpR2
+0D00  65 FB         ADC __zpR
+0D02  85 FB         STA __zpR
+0D04  A5 FE         LDA __zpR2+1
+0D06  65 FC         ADC __zpR+1
+0D08  85 FC         STA __zpR+1
+0D0A  20 29 0A      JSR __rt_topetscii
+0D0D  A5 FB         LDA __zpR
+0D0F  20 D2 FF      JSR __CHROUT
+0D12  4C 77 0C      JMP __L6
+0D15  60            RTS
+0D18  AD 26 08      LDA __rt_csp
+0D1B  85 02         STA __zpAP
+0D1D  AD 27 08      LDA __rt_csp+1
+0D20  85 03         STA __zpAP+1
+0D22  A0 00         LDY #0
+0D24  B9 16 0D      LDA __fn_print_int_frame,Y
+0D27  91 02         STA (__zpAP),Y
+0D29  C8            INY
+0D2A  C0 02         CPY #2
+0D2C  D0 F6         BNE __fn_print_int_pushfr_loop
+0D2E  18            CLC
+0D2F  AD 26 08      LDA __rt_csp
+0D32  69 02         ADC #2
+0D34  8D 26 08      STA __rt_csp
+0D37  AD 27 08      LDA __rt_csp+1
+0D3A  69 00         ADC #0
+0D3C  8D 27 08      STA __rt_csp+1
+0D3F  4C 62 08      JMP __rt_cstack_check
+0D42  38            SEC
+0D43  AD 26 08      LDA __rt_csp
+0D46  E9 02         SBC #2
+0D48  8D 26 08      STA __rt_csp
+0D4B  85 02         STA __zpAP
+0D4D  AD 27 08      LDA __rt_csp+1
+0D50  E9 00         SBC #0
+0D52  8D 27 08      STA __rt_csp+1
+0D55  85 03         STA __zpAP+1
+0D57  A0 00         LDY #0
+0D59  B1 02         LDA (__zpAP),Y
+0D5B  99 16 0D      STA __fn_print_int_frame,Y
+0D5E  C8            INY
+0D5F  C0 02         CPY #2
+0D61  D0 F6         BNE __fn_print_int_popfr_loop
+0D63  60            RTS
+0D64  AD 16 0D      LDA __fn_print_int_v_n
+0D67  85 FB         STA __zpR
+0D69  AD 17 0D      LDA __fn_print_int_v_n+1
+0D6C  85 FC         STA __zpR+1
+0D6E  20 2C 08      JSR __rt_push
+0D71  A9 00         LDA #<0
+0D73  85 FB         STA __zpR
+0D75  A9 00         LDA #>0
+0D77  85 FC         STA __zpR+1
+0D79  20 4F 08      JSR __rt_pop2
+0D7C  20 A3 09      JSR __rt_lt16
+0D7F  A5 FB         LDA __zpR
+0D81  05 FC         ORA __zpR+1
+0D83  D0 03         BNE __L11
+0D85  4C C6 0D      JMP __L9
+0D88  A9 2D         LDA #<45
+0D8A  85 FB         STA __zpR
+0D8C  A9 00         LDA #>45
+0D8E  85 FC         STA __zpR+1
+0D90  20 29 0A      JSR __rt_topetscii
+0D93  A5 FB         LDA __zpR
+0D95  20 D2 FF      JSR __CHROUT
+0D98  20 06 0B      JSR __fn_print_uint_pushframe
+0D9B  AD 16 0D      LDA __fn_print_int_v_n
+0D9E  85 FB         STA __zpR
+0DA0  AD 17 0D      LDA __fn_print_int_v_n+1
+0DA3  85 FC         STA __zpR+1
+0DA5  38            SEC
+0DA6  A9 00         LDA #0
+0DA8  E5 FB         SBC __zpR
+0DAA  AA            TAX
+0DAB  A9 00         LDA #0
+0DAD  E5 FC         SBC __zpR+1
+0DAF  85 FC         STA __zpR+1
+0DB1  86 FB         STX __zpR
+0DB3  A5 FB         LDA __zpR
+0DB5  8D FC 0A      STA __fn_print_uint_v_n
+0DB8  A5 FC         LDA __zpR+1
+0DBA  8D FD 0A      STA __fn_print_uint_v_n+1
+0DBD  20 52 0B      JSR __fn_print_uint
+0DC0  20 30 0B      JSR __fn_print_uint_popframe
+0DC3  4C E3 0D      JMP __L10
+0DC6  20 06 0B      JSR __fn_print_uint_pushframe
+0DC9  AD 16 0D      LDA __fn_print_int_v_n
+0DCC  85 FB         STA __zpR
+0DCE  AD 17 0D      LDA __fn_print_int_v_n+1
+0DD1  85 FC         STA __zpR+1
+0DD3  A5 FB         LDA __zpR
+0DD5  8D FC 0A      STA __fn_print_uint_v_n
+0DD8  A5 FC         LDA __zpR+1
+0DDA  8D FD 0A      STA __fn_print_uint_v_n+1
+0DDD  20 52 0B      JSR __fn_print_uint
+0DE0  20 30 0B      JSR __fn_print_uint_popframe
+0DE3  60            RTS
+0DE4  60            RTS
+0DE5  60            RTS
+0DE6  A9 0D         LDA #<13
+0DE8  85 FB         STA __zpR
+0DEA  A9 00         LDA #>13
+0DEC  85 FC         STA __zpR+1
+0DEE  20 29 0A      JSR __rt_topetscii
+0DF1  A5 FB         LDA __zpR
+0DF3  20 D2 FF      JSR __CHROUT
+0DF6  60            RTS
+0DF9  AD 26 08      LDA __rt_csp
+0DFC  85 02         STA __zpAP
+0DFE  AD 27 08      LDA __rt_csp+1
+0E01  85 03         STA __zpAP+1
+0E03  A0 00         LDY #0
+0E05  B9 F7 0D      LDA __fn_fact_frame,Y
+0E08  91 02         STA (__zpAP),Y
+0E0A  C8            INY
+0E0B  C0 02         CPY #2
+0E0D  D0 F6         BNE __fn_fact_pushfr_loop
+0E0F  18            CLC
+0E10  AD 26 08      LDA __rt_csp
+0E13  69 02         ADC #2
+0E15  8D 26 08      STA __rt_csp
+0E18  AD 27 08      LDA __rt_csp+1
+0E1B  69 00         ADC #0
+0E1D  8D 27 08      STA __rt_csp+1
+0E20  4C 62 08      JMP __rt_cstack_check
+0E23  38            SEC
+0E24  AD 26 08      LDA __rt_csp
+0E27  E9 02         SBC #2
+0E29  8D 26 08      STA __rt_csp
+0E2C  85 02         STA __zpAP
+0E2E  AD 27 08      LDA __rt_csp+1
+0E31  E9 00         SBC #0
+0E33  8D 27 08      STA __rt_csp+1
+0E36  85 03         STA __zpAP+1
+0E38  A0 00         LDY #0
+0E3A  B1 02         LDA (__zpAP),Y
+0E3C  99 F7 0D      STA __fn_fact_frame,Y
+0E3F  C8            INY
+0E40  C0 02         CPY #2
+0E42  D0 F6         BNE __fn_fact_popfr_loop
+0E44  60            RTS
+0E45  AD F7 0D      LDA __fn_fact_v_n
+0E48  85 FB         STA __zpR
+0E4A  AD F8 0D      LDA __fn_fact_v_n+1
+0E4D  85 FC         STA __zpR+1
+0E4F  20 2C 08      JSR __rt_push
+0E52  A9 01         LDA #<1
+0E54  85 FB         STA __zpR
+0E56  A9 00         LDA #>1
+0E58  85 FC         STA __zpR+1
+0E5A  20 4F 08      JSR __rt_pop2
+0E5D  20 E2 09      JSR __rt_le16
+0E60  A5 FB         LDA __zpR
+0E62  05 FC         ORA __zpR+1
+0E64  D0 03         BNE __L14
+0E66  4C 75 0E      JMP __L12
+0E69  A9 01         LDA #<1
+0E6B  85 FB         STA __zpR
+0E6D  A9 00         LDA #>1
+0E6F  85 FC         STA __zpR+1
+0E71  60            RTS
+0E72  4C 75 0E      JMP __L13
+0E75  AD F7 0D      LDA __fn_fact_v_n
+0E78  85 FB         STA __zpR
+0E7A  AD F8 0D      LDA __fn_fact_v_n+1
+0E7D  85 FC         STA __zpR+1
+0E7F  20 2C 08      JSR __rt_push
+0E82  20 F9 0D      JSR __fn_fact_pushframe
+0E85  AD F7 0D      LDA __fn_fact_v_n
+0E88  85 FB         STA __zpR
+0E8A  AD F8 0D      LDA __fn_fact_v_n+1
+0E8D  85 FC         STA __zpR+1
+0E8F  20 2C 08      JSR __rt_push
+0E92  A9 01         LDA #<1
+0E94  85 FB         STA __zpR
+0E96  A9 00         LDA #>1
+0E98  85 FC         STA __zpR+1
+0E9A  20 4F 08      JSR __rt_pop2
+0E9D  38            SEC
+0E9E  A5 FD         LDA __zpR2
+0EA0  E5 FB         SBC __zpR
+0EA2  85 FD         STA __zpR2
+0EA4  A5 FE         LDA __zpR2+1
+0EA6  E5 FC         SBC __zpR+1
+0EA8  85 FC         STA __zpR+1
+0EAA  A5 FD         LDA __zpR2
+0EAC  85 FB         STA __zpR
+0EAE  A5 FB         LDA __zpR
+0EB0  8D F7 0D      STA __fn_fact_v_n
+0EB3  A5 FC         LDA __zpR+1
+0EB5  8D F8 0D      STA __fn_fact_v_n+1
+0EB8  20 45 0E      JSR __fn_fact
+0EBB  20 23 0E      JSR __fn_fact_popframe
+0EBE  20 4F 08      JSR __rt_pop2
+0EC1  20 88 08      JSR __rt_mul16
+0EC4  60            RTS
+0EC5  60            RTS
+0EC8  AD 26 08      LDA __rt_csp
+0ECB  85 02         STA __zpAP
+0ECD  AD 27 08      LDA __rt_csp+1
+0ED0  85 03         STA __zpAP+1
+0ED2  A0 00         LDY #0
+0ED4  B9 C6 0E      LDA __fn_fib_frame,Y
+0ED7  91 02         STA (__zpAP),Y
+0ED9  C8            INY
+0EDA  C0 02         CPY #2
+0EDC  D0 F6         BNE __fn_fib_pushfr_loop
+0EDE  18            CLC
+0EDF  AD 26 08      LDA __rt_csp
+0EE2  69 02         ADC #2
+0EE4  8D 26 08      STA __rt_csp
+0EE7  AD 27 08      LDA __rt_csp+1
+0EEA  69 00         ADC #0
+0EEC  8D 27 08      STA __rt_csp+1
+0EEF  4C 62 08      JMP __rt_cstack_check
+0EF2  38            SEC
+0EF3  AD 26 08      LDA __rt_csp
+0EF6  E9 02         SBC #2
+0EF8  8D 26 08      STA __rt_csp
+0EFB  85 02         STA __zpAP
+0EFD  AD 27 08      LDA __rt_csp+1
+0F00  E9 00         SBC #0
+0F02  8D 27 08      STA __rt_csp+1
+0F05  85 03         STA __zpAP+1
+0F07  A0 00         LDY #0
+0F09  B1 02         LDA (__zpAP),Y
+0F0B  99 C6 0E      STA __fn_fib_frame,Y
+0F0E  C8            INY
+0F0F  C0 02         CPY #2
+0F11  D0 F6         BNE __fn_fib_popfr_loop
+0F13  60            RTS
+0F14  AD C6 0E      LDA __fn_fib_v_n
+0F17  85 FB         STA __zpR
+0F19  AD C7 0E      LDA __fn_fib_v_n+1
+0F1C  85 FC         STA __zpR+1
+0F1E  20 2C 08      JSR __rt_push
+0F21  A9 02         LDA #<2
+0F23  85 FB         STA __zpR
+0F25  A9 00         LDA #>2
+0F27  85 FC         STA __zpR+1
+0F29  20 4F 08      JSR __rt_pop2
+0F2C  20 A3 09      JSR __rt_lt16
+0F2F  A5 FB         LDA __zpR
+0F31  05 FC         ORA __zpR+1
+0F33  D0 03         BNE __L17
+0F35  4C 46 0F      JMP __L15
+0F38  AD C6 0E      LDA __fn_fib_v_n
+0F3B  85 FB         STA __zpR
+0F3D  AD C7 0E      LDA __fn_fib_v_n+1
+0F40  85 FC         STA __zpR+1
+0F42  60            RTS
+0F43  4C 46 0F      JMP __L16
+0F46  20 C8 0E      JSR __fn_fib_pushframe
+0F49  AD C6 0E      LDA __fn_fib_v_n
+0F4C  85 FB         STA __zpR
+0F4E  AD C7 0E      LDA __fn_fib_v_n+1
+0F51  85 FC         STA __zpR+1
+0F53  20 2C 08      JSR __rt_push
+0F56  A9 01         LDA #<1
+0F58  85 FB         STA __zpR
+0F5A  A9 00         LDA #>1
+0F5C  85 FC         STA __zpR+1
+0F5E  20 4F 08      JSR __rt_pop2
+0F61  38            SEC
+0F62  A5 FD         LDA __zpR2
+0F64  E5 FB         SBC __zpR
+0F66  85 FD         STA __zpR2
+0F68  A5 FE         LDA __zpR2+1
+0F6A  E5 FC         SBC __zpR+1
+0F6C  85 FC         STA __zpR+1
+0F6E  A5 FD         LDA __zpR2
+0F70  85 FB         STA __zpR
+0F72  A5 FB         LDA __zpR
+0F74  8D C6 0E      STA __fn_fib_v_n
+0F77  A5 FC         LDA __zpR+1
+0F79  8D C7 0E      STA __fn_fib_v_n+1
+0F7C  20 14 0F      JSR __fn_fib
+0F7F  20 F2 0E      JSR __fn_fib_popframe
+0F82  20 2C 08      JSR __rt_push
+0F85  20 C8 0E      JSR __fn_fib_pushframe
+0F88  AD C6 0E      LDA __fn_fib_v_n
+0F8B  85 FB         STA __zpR
+0F8D  AD C7 0E      LDA __fn_fib_v_n+1
+0F90  85 FC         STA __zpR+1
+0F92  20 2C 08      JSR __rt_push
+0F95  A9 02         LDA #<2
+0F97  85 FB         STA __zpR
+0F99  A9 00         LDA #>2
+0F9B  85 FC         STA __zpR+1
+0F9D  20 4F 08      JSR __rt_pop2
+0FA0  38            SEC
+0FA1  A5 FD         LDA __zpR2
+0FA3  E5 FB         SBC __zpR
+0FA5  85 FD         STA __zpR2
+0FA7  A5 FE         LDA __zpR2+1
+0FA9  E5 FC         SBC __zpR+1
+0FAB  85 FC         STA __zpR+1
+0FAD  A5 FD         LDA __zpR2
+0FAF  85 FB         STA __zpR
+0FB1  A5 FB         LDA __zpR
+0FB3  8D C6 0E      STA __fn_fib_v_n
+0FB6  A5 FC         LDA __zpR+1
+0FB8  8D C7 0E      STA __fn_fib_v_n+1
+0FBB  20 14 0F      JSR __fn_fib
+0FBE  20 F2 0E      JSR __fn_fib_popframe
+0FC1  20 4F 08      JSR __rt_pop2
+0FC4  18            CLC
+0FC5  A5 FD         LDA __zpR2
+0FC7  65 FB         ADC __zpR
+0FC9  85 FB         STA __zpR
+0FCB  A5 FE         LDA __zpR2+1
+0FCD  65 FC         ADC __zpR+1
+0FCF  85 FC         STA __zpR+1
+0FD1  60            RTS
+0FD2  60            RTS
+0FD5  AD 26 08      LDA __rt_csp
+0FD8  85 02         STA __zpAP
+0FDA  AD 27 08      LDA __rt_csp+1
+0FDD  85 03         STA __zpAP+1
+0FDF  A0 00         LDY #0
+0FE1  B9 D3 0F      LDA __fn_is_odd_frame,Y
+0FE4  91 02         STA (__zpAP),Y
+0FE6  C8            INY
+0FE7  C0 02         CPY #2
+0FE9  D0 F6         BNE __fn_is_odd_pushfr_loop
+0FEB  18            CLC
+0FEC  AD 26 08      LDA __rt_csp
+0FEF  69 02         ADC #2
+0FF1  8D 26 08      STA __rt_csp
+0FF4  AD 27 08      LDA __rt_csp+1
+0FF7  69 00         ADC #0
+0FF9  8D 27 08      STA __rt_csp+1
+0FFC  4C 62 08      JMP __rt_cstack_check
+0FFF  38            SEC
+1000  AD 26 08      LDA __rt_csp
+1003  E9 02         SBC #2
+1005  8D 26 08      STA __rt_csp
+1008  85 02         STA __zpAP
+100A  AD 27 08      LDA __rt_csp+1
+100D  E9 00         SBC #0
+100F  8D 27 08      STA __rt_csp+1
+1012  85 03         STA __zpAP+1
+1014  A0 00         LDY #0
+1016  B1 02         LDA (__zpAP),Y
+1018  99 D3 0F      STA __fn_is_odd_frame,Y
+101B  C8            INY
+101C  C0 02         CPY #2
+101E  D0 F6         BNE __fn_is_odd_popfr_loop
+1020  60            RTS
+1021  AD D3 0F      LDA __fn_is_odd_v_n
+1024  85 FB         STA __zpR
+1026  AD D4 0F      LDA __fn_is_odd_v_n+1
+1029  85 FC         STA __zpR+1
+102B  20 2C 08      JSR __rt_push
+102E  A9 00         LDA #<0
+1030  85 FB         STA __zpR
+1032  A9 00         LDA #>0
+1034  85 FC         STA __zpR+1
+1036  20 4F 08      JSR __rt_pop2
+1039  20 4F 09      JSR __rt_eq16
+103C  A5 FB         LDA __zpR
+103E  05 FC         ORA __zpR+1
+1040  D0 03         BNE __L20
+1042  4C 51 10      JMP __L18
+1045  A9 00         LDA #<0
+1047  85 FB         STA __zpR
+1049  A9 00         LDA #>0
+104B  85 FC         STA __zpR+1
+104D  60            RTS
+104E  4C 51 10      JMP __L19
+1051  20 91 10      JSR __fn_is_even_pushframe
+1054  AD D3 0F      LDA __fn_is_odd_v_n
+1057  85 FB         STA __zpR
+1059  AD D4 0F      LDA __fn_is_odd_v_n+1
+105C  85 FC         STA __zpR+1
+105E  20 2C 08      JSR __rt_push
+1061  A9 01         LDA #<1
+1063  85 FB         STA __zpR
+1065  A9 00         LDA #>1
+1067  85 FC         STA __zpR+1
+1069  20 4F 08      JSR __rt_pop2
+106C  38            SEC
+106D  A5 FD         LDA __zpR2
+106F  E5 FB         SBC __zpR
+1071  85 FD         STA __zpR2
+1073  A5 FE         LDA __zpR2+1
+1075  E5 FC         SBC __zpR+1
+1077  85 FC         STA __zpR+1
+1079  A5 FD         LDA __zpR2
+107B  85 FB         STA __zpR
+107D  A5 FB         LDA __zpR
+107F  8D 8F 10      STA __fn_is_even_v_n
+1082  A5 FC         LDA __zpR+1
+1084  8D 90 10      STA __fn_is_even_v_n+1
+1087  20 DD 10      JSR __fn_is_even
+108A  20 BB 10      JSR __fn_is_even_popframe
+108D  60            RTS
+108E  60            RTS
+1091  AD 26 08      LDA __rt_csp
+1094  85 02         STA __zpAP
+1096  AD 27 08      LDA __rt_csp+1
+1099  85 03         STA __zpAP+1
+109B  A0 00         LDY #0
+109D  B9 8F 10      LDA __fn_is_even_frame,Y
+10A0  91 02         STA (__zpAP),Y
+10A2  C8            INY
+10A3  C0 02         CPY #2
+10A5  D0 F6         BNE __fn_is_even_pushfr_loop
+10A7  18            CLC
+10A8  AD 26 08      LDA __rt_csp
+10AB  69 02         ADC #2
+10AD  8D 26 08      STA __rt_csp
+10B0  AD 27 08      LDA __rt_csp+1
+10B3  69 00         ADC #0
+10B5  8D 27 08      STA __rt_csp+1
+10B8  4C 62 08      JMP __rt_cstack_check
+10BB  38            SEC
+10BC  AD 26 08      LDA __rt_csp
+10BF  E9 02         SBC #2
+10C1  8D 26 08      STA __rt_csp
+10C4  85 02         STA __zpAP
+10C6  AD 27 08      LDA __rt_csp+1
+10C9  E9 00         SBC #0
+10CB  8D 27 08      STA __rt_csp+1
+10CE  85 03         STA __zpAP+1
+10D0  A0 00         LDY #0
+10D2  B1 02         LDA (__zpAP),Y
+10D4  99 8F 10      STA __fn_is_even_frame,Y
+10D7  C8            INY
+10D8  C0 02         CPY #2
+10DA  D0 F6         BNE __fn_is_even_popfr_loop
+10DC  60            RTS
+10DD  AD 8F 10      LDA __fn_is_even_v_n
+10E0  85 FB         STA __zpR
+10E2  AD 90 10      LDA __fn_is_even_v_n+1
+10E5  85 FC         STA __zpR+1
+10E7  20 2C 08      JSR __rt_push
+10EA  A9 00         LDA #<0
+10EC  85 FB         STA __zpR
+10EE  A9 00         LDA #>0
+10F0  85 FC         STA __zpR+1
+10F2  20 4F 08      JSR __rt_pop2
+10F5  20 4F 09      JSR __rt_eq16
+10F8  A5 FB         LDA __zpR
+10FA  05 FC         ORA __zpR+1
+10FC  D0 03         BNE __L23
+10FE  4C 0D 11      JMP __L21
+1101  A9 01         LDA #<1
+1103  85 FB         STA __zpR
+1105  A9 00         LDA #>1
+1107  85 FC         STA __zpR+1
+1109  60            RTS
+110A  4C 0D 11      JMP __L22
+110D  20 D5 0F      JSR __fn_is_odd_pushframe
+1110  AD 8F 10      LDA __fn_is_even_v_n
+1113  85 FB         STA __zpR
+1115  AD 90 10      LDA __fn_is_even_v_n+1
+1118  85 FC         STA __zpR+1
+111A  20 2C 08      JSR __rt_push
+111D  A9 01         LDA #<1
+111F  85 FB         STA __zpR
+1121  A9 00         LDA #>1
+1123  85 FC         STA __zpR+1
+1125  20 4F 08      JSR __rt_pop2
+1128  38            SEC
+1129  A5 FD         LDA __zpR2
+112B  E5 FB         SBC __zpR
+112D  85 FD         STA __zpR2
+112F  A5 FE         LDA __zpR2+1
+1131  E5 FC         SBC __zpR+1
+1133  85 FC         STA __zpR+1
+1135  A5 FD         LDA __zpR2
+1137  85 FB         STA __zpR
+1139  A5 FB         LDA __zpR
+113B  8D D3 0F      STA __fn_is_odd_v_n
+113E  A5 FC         LDA __zpR+1
+1140  8D D4 0F      STA __fn_is_odd_v_n+1
+1143  20 21 10      JSR __fn_is_odd
+1146  20 FF 0F      JSR __fn_is_odd_popframe
+1149  60            RTS
+114A  60            RTS
+114F  AD 26 08      LDA __rt_csp
+1152  85 02         STA __zpAP
+1154  AD 27 08      LDA __rt_csp+1
+1157  85 03         STA __zpAP+1
+1159  A0 00         LDY #0
+115B  B9 4B 11      LDA __fn_rprint_uint_frame,Y
+115E  91 02         STA (__zpAP),Y
+1160  C8            INY
+1161  C0 04         CPY #4
+1163  D0 F6         BNE __fn_rprint_uint_pushfr_loop
+1165  18            CLC
+1166  AD 26 08      LDA __rt_csp
+1169  69 04         ADC #4
+116B  8D 26 08      STA __rt_csp
+116E  AD 27 08      LDA __rt_csp+1
+1171  69 00         ADC #0
+1173  8D 27 08      STA __rt_csp+1
+1176  4C 62 08      JMP __rt_cstack_check
+1179  38            SEC
+117A  AD 26 08      LDA __rt_csp
+117D  E9 04         SBC #4
+117F  8D 26 08      STA __rt_csp
+1182  85 02         STA __zpAP
+1184  AD 27 08      LDA __rt_csp+1
+1187  E9 00         SBC #0
+1189  8D 27 08      STA __rt_csp+1
+118C  85 03         STA __zpAP+1
+118E  A0 00         LDY #0
+1190  B1 02         LDA (__zpAP),Y
+1192  99 4B 11      STA __fn_rprint_uint_frame,Y
+1195  C8            INY
+1196  C0 04         CPY #4
+1198  D0 F6         BNE __fn_rprint_uint_popfr_loop
+119A  60            RTS
+119B  AD 4B 11      LDA __fn_rprint_uint_v_n
+119E  85 FB         STA __zpR
+11A0  AD 4C 11      LDA __fn_rprint_uint_v_n+1
+11A3  85 FC         STA __zpR+1
+11A5  20 2C 08      JSR __rt_push
+11A8  A9 0A         LDA #<10
+11AA  85 FB         STA __zpR
+11AC  A9 00         LDA #>10
+11AE  85 FC         STA __zpR+1
+11B0  20 4F 08      JSR __rt_pop2
+11B3  20 1A 09      JSR __rt_sdivmod16
+11B6  AD 2A 08      LDA __zpT0
+11B9  85 FB         STA __zpR
+11BB  AD 2B 08      LDA __zpT0+1
+11BE  85 FC         STA __zpR+1
+11C0  A5 FB         LDA __zpR
+11C2  8D 4D 11      STA __fn_rprint_uint_v_digit
+11C5  A5 FC         LDA __zpR+1
+11C7  8D 4E 11      STA __fn_rprint_uint_v_digit+1
+11CA  AD 4B 11      LDA __fn_rprint_uint_v_n
+11CD  85 FB         STA __zpR
+11CF  AD 4C 11      LDA __fn_rprint_uint_v_n+1
+11D2  85 FC         STA __zpR+1
+11D4  20 2C 08      JSR __rt_push
+11D7  A9 0A         LDA #<10
+11D9  85 FB         STA __zpR
+11DB  A9 00         LDA #>10
+11DD  85 FC         STA __zpR+1
+11DF  20 4F 08      JSR __rt_pop2
+11E2  20 B8 09      JSR __rt_ge16
+11E5  A5 FB         LDA __zpR
+11E7  05 FC         ORA __zpR+1
+11E9  D0 03         BNE __L26
+11EB  4C 27 12      JMP __L24
+11EE  20 4F 11      JSR __fn_rprint_uint_pushframe
+11F1  AD 4B 11      LDA __fn_rprint_uint_v_n
+11F4  85 FB         STA __zpR
+11F6  AD 4C 11      LDA __fn_rprint_uint_v_n+1
+11F9  85 FC         STA __zpR+1
+11FB  20 2C 08      JSR __rt_push
+11FE  A9 0A         LDA #<10
+1200  85 FB         STA __zpR
+1202  A9 00         LDA #>10
+1204  85 FC         STA __zpR+1
+1206  20 4F 08      JSR __rt_pop2
+1209  20 1A 09      JSR __rt_sdivmod16
+120C  A5 FD         LDA __zpR2
+120E  85 FB         STA __zpR
+1210  A5 FE         LDA __zpR2+1
+1212  85 FC         STA __zpR+1
+1214  A5 FB         LDA __zpR
+1216  8D 4B 11      STA __fn_rprint_uint_v_n
+1219  A5 FC         LDA __zpR+1
+121B  8D 4C 11      STA __fn_rprint_uint_v_n+1
+121E  20 9B 11      JSR __fn_rprint_uint
+1221  20 79 11      JSR __fn_rprint_uint_popframe
+1224  4C 27 12      JMP __L25
+1227  AD 4D 11      LDA __fn_rprint_uint_v_digit
+122A  85 FB         STA __zpR
+122C  AD 4E 11      LDA __fn_rprint_uint_v_digit+1
+122F  85 FC         STA __zpR+1
+1231  20 2C 08      JSR __rt_push
+1234  A9 30         LDA #<48
+1236  85 FB         STA __zpR
+1238  A9 00         LDA #>48
+123A  85 FC         STA __zpR+1
+123C  20 4F 08      JSR __rt_pop2
+123F  18            CLC
+1240  A5 FD         LDA __zpR2
+1242  65 FB         ADC __zpR
+1244  85 FB         STA __zpR
+1246  A5 FE         LDA __zpR2+1
+1248  65 FC         ADC __zpR+1
+124A  85 FC         STA __zpR+1
+124C  20 29 0A      JSR __rt_topetscii
+124F  A5 FB         LDA __zpR
+1251  20 D2 FF      JSR __CHROUT
+1254  60            RTS
+1257  AD 26 08      LDA __rt_csp
+125A  85 02         STA __zpAP
+125C  AD 27 08      LDA __rt_csp+1
+125F  85 03         STA __zpAP+1
+1261  A0 00         LDY #0
+1263  B9 55 12      LDA __fn_rstrlen_frame,Y
+1266  91 02         STA (__zpAP),Y
+1268  C8            INY
+1269  C0 02         CPY #2
+126B  D0 F6         BNE __fn_rstrlen_pushfr_loop
+126D  18            CLC
+126E  AD 26 08      LDA __rt_csp
+1271  69 02         ADC #2
+1273  8D 26 08      STA __rt_csp
+1276  AD 27 08      LDA __rt_csp+1
+1279  69 00         ADC #0
+127B  8D 27 08      STA __rt_csp+1
+127E  4C 62 08      JMP __rt_cstack_check
+1281  38            SEC
+1282  AD 26 08      LDA __rt_csp
+1285  E9 02         SBC #2
+1287  8D 26 08      STA __rt_csp
+128A  85 02         STA __zpAP
+128C  AD 27 08      LDA __rt_csp+1
+128F  E9 00         SBC #0
+1291  8D 27 08      STA __rt_csp+1
+1294  85 03         STA __zpAP+1
+1296  A0 00         LDY #0
+1298  B1 02         LDA (__zpAP),Y
+129A  99 55 12      STA __fn_rstrlen_frame,Y
+129D  C8            INY
+129E  C0 02         CPY #2
+12A0  D0 F6         BNE __fn_rstrlen_popfr_loop
+12A2  60            RTS
+12A3  AD 55 12      LDA __fn_rstrlen_v_s
+12A6  85 FB         STA __zpR
+12A8  AD 56 12      LDA __fn_rstrlen_v_s+1
+12AB  85 FC         STA __zpR+1
+12AD  A5 FB         LDA __zpR
+12AF  85 02         STA __zpAP
+12B1  A5 FC         LDA __zpR+1
+12B3  85 03         STA __zpAP+1
+12B5  A0 00         LDY #0
+12B7  B1 02         LDA (__zpAP),Y
+12B9  85 FB         STA __zpR
+12BB  A9 00         LDA #0
+12BD  85 FC         STA __zpR+1
+12BF  20 2C 08      JSR __rt_push
+12C2  A9 00         LDA #<0
+12C4  85 FB         STA __zpR
+12C6  A9 00         LDA #>0
+12C8  85 FC         STA __zpR+1
+12CA  20 4F 08      JSR __rt_pop2
+12CD  20 4F 09      JSR __rt_eq16
+12D0  A5 FB         LDA __zpR
+12D2  05 FC         ORA __zpR+1
+12D4  D0 03         BNE __L29
+12D6  4C E5 12      JMP __L27
+12D9  A9 00         LDA #<0
+12DB  85 FB         STA __zpR
+12DD  A9 00         LDA #>0
+12DF  85 FC         STA __zpR+1
+12E1  60            RTS
+12E2  4C E5 12      JMP __L28
+12E5  A9 01         LDA #<1
+12E7  85 FB         STA __zpR
+12E9  A9 00         LDA #>1
+12EB  85 FC         STA __zpR+1
+12ED  20 2C 08      JSR __rt_push
+12F0  20 57 12      JSR __fn_rstrlen_pushframe
+12F3  AD 55 12      LDA __fn_rstrlen_v_s
+12F6  85 FB         STA __zpR
+12F8  AD 56 12      LDA __fn_rstrlen_v_s+1
+12FB  85 FC         STA __zpR+1
+12FD  20 2C 08      JSR __rt_push
+1300  A9 01         LDA #<1
+1302  85 FB         STA __zpR
+1304  A9 00         LDA #>1
+1306  85 FC         STA __zpR+1
+1308  20 4F 08      JSR __rt_pop2
+130B  18            CLC
+130C  A5 FD         LDA __zpR2
+130E  65 FB         ADC __zpR
+1310  85 FB         STA __zpR
+1312  A5 FE         LDA __zpR2+1
+1314  65 FC         ADC __zpR+1
+1316  85 FC         STA __zpR+1
+1318  A5 FB         LDA __zpR
+131A  8D 55 12      STA __fn_rstrlen_v_s
+131D  A5 FC         LDA __zpR+1
+131F  8D 56 12      STA __fn_rstrlen_v_s+1
+1322  20 A3 12      JSR __fn_rstrlen
+1325  20 81 12      JSR __fn_rstrlen_popframe
+1328  20 4F 08      JSR __rt_pop2
+132B  18            CLC
+132C  A5 FD         LDA __zpR2
+132E  65 FB         ADC __zpR
+1330  85 FB         STA __zpR
+1332  A5 FE         LDA __zpR2+1
+1334  65 FC         ADC __zpR+1
+1336  85 FC         STA __zpR+1
+1338  60            RTS
+1339  60            RTS
+133E  AD 26 08      LDA __rt_csp
+1341  85 02         STA __zpAP
+1343  AD 27 08      LDA __rt_csp+1
+1346  85 03         STA __zpAP+1
+1348  A0 00         LDY #0
+134A  B9 3A 13      LDA __fn_depth_count_frame,Y
+134D  91 02         STA (__zpAP),Y
+134F  C8            INY
+1350  C0 04         CPY #4
+1352  D0 F6         BNE __fn_depth_count_pushfr_loop
+1354  18            CLC
+1355  AD 26 08      LDA __rt_csp
+1358  69 04         ADC #4
+135A  8D 26 08      STA __rt_csp
+135D  AD 27 08      LDA __rt_csp+1
+1360  69 00         ADC #0
+1362  8D 27 08      STA __rt_csp+1
+1365  4C 62 08      JMP __rt_cstack_check
+1368  38            SEC
+1369  AD 26 08      LDA __rt_csp
+136C  E9 04         SBC #4
+136E  8D 26 08      STA __rt_csp
+1371  85 02         STA __zpAP
+1373  AD 27 08      LDA __rt_csp+1
+1376  E9 00         SBC #0
+1378  8D 27 08      STA __rt_csp+1
+137B  85 03         STA __zpAP+1
+137D  A0 00         LDY #0
+137F  B1 02         LDA (__zpAP),Y
+1381  99 3A 13      STA __fn_depth_count_frame,Y
+1384  C8            INY
+1385  C0 04         CPY #4
+1387  D0 F6         BNE __fn_depth_count_popfr_loop
+1389  60            RTS
+138A  AD 3C 13      LDA __fn_depth_count_v_counter
+138D  85 FB         STA __zpR
+138F  AD 3D 13      LDA __fn_depth_count_v_counter+1
+1392  85 FC         STA __zpR+1
+1394  A5 FB         LDA __zpR
+1396  85 02         STA __zpAP
+1398  A5 FC         LDA __zpR+1
+139A  85 03         STA __zpAP+1
+139C  A5 02         LDA __zpAP
+139E  85 FB         STA __zpR
+13A0  A5 03         LDA __zpAP+1
+13A2  85 FC         STA __zpR+1
+13A4  20 2C 08      JSR __rt_push
+13A7  AD 3C 13      LDA __fn_depth_count_v_counter
+13AA  85 FB         STA __zpR
+13AC  AD 3D 13      LDA __fn_depth_count_v_counter+1
+13AF  85 FC         STA __zpR+1
+13B1  A5 FB         LDA __zpR
+13B3  85 02         STA __zpAP
+13B5  A5 FC         LDA __zpR+1
+13B7  85 03         STA __zpAP+1
+13B9  A0 00         LDY #0
+13BB  B1 02         LDA (__zpAP),Y
+13BD  85 FB         STA __zpR
+13BF  C8            INY
+13C0  B1 02         LDA (__zpAP),Y
+13C2  85 FC         STA __zpR+1
+13C4  20 2C 08      JSR __rt_push
+13C7  A9 01         LDA #<1
+13C9  85 FB         STA __zpR
+13CB  A9 00         LDA #>1
+13CD  85 FC         STA __zpR+1
+13CF  20 4F 08      JSR __rt_pop2
+13D2  18            CLC
+13D3  A5 FD         LDA __zpR2
+13D5  65 FB         ADC __zpR
+13D7  85 FB         STA __zpR
+13D9  A5 FE         LDA __zpR2+1
+13DB  65 FC         ADC __zpR+1
+13DD  85 FC         STA __zpR+1
+13DF  20 4F 08      JSR __rt_pop2
+13E2  A5 FD         LDA __zpR2
+13E4  85 02         STA __zpAP
+13E6  A5 FE         LDA __zpR2+1
+13E8  85 03         STA __zpAP+1
+13EA  A0 00         LDY #0
+13EC  A5 FB         LDA __zpR
+13EE  91 02         STA (__zpAP),Y
+13F0  C8            INY
+13F1  A5 FC         LDA __zpR+1
+13F3  91 02         STA (__zpAP),Y
+13F5  AD 3A 13      LDA __fn_depth_count_v_n
+13F8  85 FB         STA __zpR
+13FA  AD 3B 13      LDA __fn_depth_count_v_n+1
+13FD  85 FC         STA __zpR+1
+13FF  20 2C 08      JSR __rt_push
+1402  A9 01         LDA #<1
+1404  85 FB         STA __zpR
+1406  A9 00         LDA #>1
+1408  85 FC         STA __zpR+1
+140A  20 4F 08      JSR __rt_pop2
+140D  20 E2 09      JSR __rt_le16
+1410  A5 FB         LDA __zpR
+1412  05 FC         ORA __zpR+1
+1414  D0 03         BNE __L32
+1416  4C 25 14      JMP __L30
+1419  A9 01         LDA #<1
+141B  85 FB         STA __zpR
+141D  A9 00         LDA #>1
+141F  85 FC         STA __zpR+1
+1421  60            RTS
+1422  4C 25 14      JMP __L31
+1425  A9 01         LDA #<1
+1427  85 FB         STA __zpR
+1429  A9 00         LDA #>1
+142B  85 FC         STA __zpR+1
+142D  20 2C 08      JSR __rt_push
+1430  20 3E 13      JSR __fn_depth_count_pushframe
+1433  AD 3A 13      LDA __fn_depth_count_v_n
+1436  85 FB         STA __zpR
+1438  AD 3B 13      LDA __fn_depth_count_v_n+1
+143B  85 FC         STA __zpR+1
+143D  20 2C 08      JSR __rt_push
+1440  A9 01         LDA #<1
+1442  85 FB         STA __zpR
+1444  A9 00         LDA #>1
+1446  85 FC         STA __zpR+1
+1448  20 4F 08      JSR __rt_pop2
+144B  38            SEC
+144C  A5 FD         LDA __zpR2
+144E  E5 FB         SBC __zpR
+1450  85 FD         STA __zpR2
+1452  A5 FE         LDA __zpR2+1
+1454  E5 FC         SBC __zpR+1
+1456  85 FC         STA __zpR+1
+1458  A5 FD         LDA __zpR2
+145A  85 FB         STA __zpR
+145C  A5 FB         LDA __zpR
+145E  8D 3A 13      STA __fn_depth_count_v_n
+1461  A5 FC         LDA __zpR+1
+1463  8D 3B 13      STA __fn_depth_count_v_n+1
+1466  AD 3C 13      LDA __fn_depth_count_v_counter
+1469  85 FB         STA __zpR
+146B  AD 3D 13      LDA __fn_depth_count_v_counter+1
+146E  85 FC         STA __zpR+1
+1470  A5 FB         LDA __zpR
+1472  8D 3C 13      STA __fn_depth_count_v_counter
+1475  A5 FC         LDA __zpR+1
+1477  8D 3D 13      STA __fn_depth_count_v_counter+1
+147A  20 8A 13      JSR __fn_depth_count
+147D  20 68 13      JSR __fn_depth_count_popframe
+1480  20 4F 08      JSR __rt_pop2
+1483  18            CLC
+1484  A5 FD         LDA __zpR2
+1486  65 FB         ADC __zpR
+1488  85 FB         STA __zpR
+148A  A5 FE         LDA __zpR2+1
+148C  65 FC         ADC __zpR+1
+148E  85 FC         STA __zpR+1
+1490  60            RTS
+1491  60            RTS
+149E  AD 26 08      LDA __rt_csp
+14A1  85 02         STA __zpAP
+14A3  AD 27 08      LDA __rt_csp+1
+14A6  85 03         STA __zpAP+1
+14A8  A0 00         LDY #0
+14AA  B9 92 14      LDA __fn_arr_check_frame,Y
+14AD  91 02         STA (__zpAP),Y
+14AF  C8            INY
+14B0  C0 0C         CPY #12
+14B2  D0 F6         BNE __fn_arr_check_pushfr_loop
+14B4  18            CLC
+14B5  AD 26 08      LDA __rt_csp
+14B8  69 0C         ADC #12
+14BA  8D 26 08      STA __rt_csp
+14BD  AD 27 08      LDA __rt_csp+1
+14C0  69 00         ADC #0
+14C2  8D 27 08      STA __rt_csp+1
+14C5  4C 62 08      JMP __rt_cstack_check
+14C8  38            SEC
+14C9  AD 26 08      LDA __rt_csp
+14CC  E9 0C         SBC #12
+14CE  8D 26 08      STA __rt_csp
+14D1  85 02         STA __zpAP
+14D3  AD 27 08      LDA __rt_csp+1
+14D6  E9 00         SBC #0
+14D8  8D 27 08      STA __rt_csp+1
+14DB  85 03         STA __zpAP+1
+14DD  A0 00         LDY #0
+14DF  B1 02         LDA (__zpAP),Y
+14E1  99 92 14      STA __fn_arr_check_frame,Y
+14E4  C8            INY
+14E5  C0 0C         CPY #12
+14E7  D0 F6         BNE __fn_arr_check_popfr_loop
+14E9  60            RTS
+14EA  A9 00         LDA #<0
+14EC  85 FB         STA __zpR
+14EE  A9 00         LDA #>0
+14F0  85 FC         STA __zpR+1
+14F2  A5 FB         LDA __zpR
+14F4  8D 9C 14      STA __fn_arr_check_v_i
+14F7  A5 FC         LDA __zpR+1
+14F9  8D 9D 14      STA __fn_arr_check_v_i+1
+14FC  AD 9C 14      LDA __fn_arr_check_v_i
+14FF  85 FB         STA __zpR
+1501  AD 9D 14      LDA __fn_arr_check_v_i+1
+1504  85 FC         STA __zpR+1
+1506  20 2C 08      JSR __rt_push
+1509  A9 04         LDA #<4
+150B  85 FB         STA __zpR
+150D  A9 00         LDA #>4
+150F  85 FC         STA __zpR+1
+1511  20 4F 08      JSR __rt_pop2
+1514  20 A3 09      JSR __rt_lt16
+1517  A5 FB         LDA __zpR
+1519  05 FC         ORA __zpR+1
+151B  D0 03         BNE __L36
+151D  4C C6 15      JMP __L34
+1520  AD 9C 14      LDA __fn_arr_check_v_i
+1523  85 FB         STA __zpR
+1525  AD 9D 14      LDA __fn_arr_check_v_i+1
+1528  85 FC         STA __zpR+1
+152A  06 FB         ASL __zpR
+152C  26 FC         ROL __zpR+1
+152E  18            CLC
+152F  A5 FB         LDA __zpR
+1531  69 94         ADC #<__fn_arr_check_v_a
+1533  85 02         STA __zpAP
+1535  A5 FC         LDA __zpR+1
+1537  69 14         ADC #>__fn_arr_check_v_a
+1539  85 03         STA __zpAP+1
+153B  A5 02         LDA __zpAP
+153D  85 FB         STA __zpR
+153F  A5 03         LDA __zpAP+1
+1541  85 FC         STA __zpR+1
+1543  20 2C 08      JSR __rt_push
+1546  AD 92 14      LDA __fn_arr_check_v_n
+1549  85 FB         STA __zpR
+154B  AD 93 14      LDA __fn_arr_check_v_n+1
+154E  85 FC         STA __zpR+1
+1550  20 2C 08      JSR __rt_push
+1553  A9 0A         LDA #<10
+1555  85 FB         STA __zpR
+1557  A9 00         LDA #>10
+1559  85 FC         STA __zpR+1
+155B  20 4F 08      JSR __rt_pop2
+155E  20 88 08      JSR __rt_mul16
+1561  20 2C 08      JSR __rt_push
+1564  AD 9C 14      LDA __fn_arr_check_v_i
+1567  85 FB         STA __zpR
+1569  AD 9D 14      LDA __fn_arr_check_v_i+1
+156C  85 FC         STA __zpR+1
+156E  20 4F 08      JSR __rt_pop2
+1571  18            CLC
+1572  A5 FD         LDA __zpR2
+1574  65 FB         ADC __zpR
+1576  85 FB         STA __zpR
+1578  A5 FE         LDA __zpR2+1
+157A  65 FC         ADC __zpR+1
+157C  85 FC         STA __zpR+1
+157E  20 4F 08      JSR __rt_pop2
+1581  A5 FD         LDA __zpR2
+1583  85 02         STA __zpAP
+1585  A5 FE         LDA __zpR2+1
+1587  85 03         STA __zpAP+1
+1589  A0 00         LDY #0
+158B  A5 FB         LDA __zpR
+158D  91 02         STA (__zpAP),Y
+158F  C8            INY
+1590  A5 FC         LDA __zpR+1
+1592  91 02         STA (__zpAP),Y
+1594  AD 9C 14      LDA __fn_arr_check_v_i
+1597  85 FB         STA __zpR
+1599  AD 9D 14      LDA __fn_arr_check_v_i+1
+159C  85 FC         STA __zpR+1
+159E  20 2C 08      JSR __rt_push
+15A1  A9 01         LDA #<1
+15A3  85 FB         STA __zpR
+15A5  A9 00         LDA #>1
+15A7  85 FC         STA __zpR+1
+15A9  20 4F 08      JSR __rt_pop2
+15AC  18            CLC
+15AD  A5 FD         LDA __zpR2
+15AF  65 FB         ADC __zpR
+15B1  85 FB         STA __zpR
+15B3  A5 FE         LDA __zpR2+1
+15B5  65 FC         ADC __zpR+1
+15B7  85 FC         STA __zpR+1
+15B9  A5 FB         LDA __zpR
+15BB  8D 9C 14      STA __fn_arr_check_v_i
+15BE  A5 FC         LDA __zpR+1
+15C0  8D 9D 14      STA __fn_arr_check_v_i+1
+15C3  4C FC 14      JMP __L33
+15C6  AD 92 14      LDA __fn_arr_check_v_n
+15C9  85 FB         STA __zpR
+15CB  AD 93 14      LDA __fn_arr_check_v_n+1
+15CE  85 FC         STA __zpR+1
+15D0  20 2C 08      JSR __rt_push
+15D3  A9 01         LDA #<1
+15D5  85 FB         STA __zpR
+15D7  A9 00         LDA #>1
+15D9  85 FC         STA __zpR+1
+15DB  20 4F 08      JSR __rt_pop2
+15DE  20 CD 09      JSR __rt_gt16
+15E1  A5 FB         LDA __zpR
+15E3  05 FC         ORA __zpR+1
+15E5  D0 03         BNE __L39
+15E7  4C 4F 16      JMP __L37
+15EA  20 9E 14      JSR __fn_arr_check_pushframe
+15ED  AD 92 14      LDA __fn_arr_check_v_n
+15F0  85 FB         STA __zpR
+15F2  AD 93 14      LDA __fn_arr_check_v_n+1
+15F5  85 FC         STA __zpR+1
+15F7  20 2C 08      JSR __rt_push
+15FA  A9 01         LDA #<1
+15FC  85 FB         STA __zpR
+15FE  A9 00         LDA #>1
+1600  85 FC         STA __zpR+1
+1602  20 4F 08      JSR __rt_pop2
+1605  38            SEC
+1606  A5 FD         LDA __zpR2
+1608  E5 FB         SBC __zpR
+160A  85 FD         STA __zpR2
+160C  A5 FE         LDA __zpR2+1
+160E  E5 FC         SBC __zpR+1
+1610  85 FC         STA __zpR+1
+1612  A5 FD         LDA __zpR2
+1614  85 FB         STA __zpR
+1616  A5 FB         LDA __zpR
+1618  8D 92 14      STA __fn_arr_check_v_n
+161B  A5 FC         LDA __zpR+1
+161D  8D 93 14      STA __fn_arr_check_v_n+1
+1620  20 EA 14      JSR __fn_arr_check
+1623  20 C8 14      JSR __fn_arr_check_popframe
+1626  20 2C 08      JSR __rt_push
+1629  A9 00         LDA #<0
+162B  85 FB         STA __zpR
+162D  A9 00         LDA #>0
+162F  85 FC         STA __zpR+1
+1631  20 4F 08      JSR __rt_pop2
+1634  20 4F 09      JSR __rt_eq16
+1637  A5 FB         LDA __zpR
+1639  05 FC         ORA __zpR+1
+163B  D0 03         BNE __L42
+163D  4C 4C 16      JMP __L40
+1640  A9 00         LDA #<0
+1642  85 FB         STA __zpR
+1644  A9 00         LDA #>0
+1646  85 FC         STA __zpR+1
+1648  60            RTS
+1649  4C 4C 16      JMP __L41
+164C  4C 4F 16      JMP __L38
+164F  A9 00         LDA #<0
+1651  85 FB         STA __zpR
+1653  A9 00         LDA #>0
+1655  85 FC         STA __zpR+1
+1657  A5 FB         LDA __zpR
+1659  8D 9C 14      STA __fn_arr_check_v_i
+165C  A5 FC         LDA __zpR+1
+165E  8D 9D 14      STA __fn_arr_check_v_i+1
+1661  AD 9C 14      LDA __fn_arr_check_v_i
+1664  85 FB         STA __zpR
+1666  AD 9D 14      LDA __fn_arr_check_v_i+1
+1669  85 FC         STA __zpR+1
+166B  20 2C 08      JSR __rt_push
+166E  A9 04         LDA #<4
+1670  85 FB         STA __zpR
+1672  A9 00         LDA #>4
+1674  85 FC         STA __zpR+1
+1676  20 4F 08      JSR __rt_pop2
+1679  20 A3 09      JSR __rt_lt16
+167C  A5 FB         LDA __zpR
+167E  05 FC         ORA __zpR+1
+1680  D0 03         BNE __L46
+1682  4C 33 17      JMP __L44
+1685  AD 9C 14      LDA __fn_arr_check_v_i
+1688  85 FB         STA __zpR
+168A  AD 9D 14      LDA __fn_arr_check_v_i+1
+168D  85 FC         STA __zpR+1
+168F  06 FB         ASL __zpR
+1691  26 FC         ROL __zpR+1
+1693  18            CLC
+1694  A5 FB         LDA __zpR
+1696  69 94         ADC #<__fn_arr_check_v_a
+1698  85 02         STA __zpAP
+169A  A5 FC         LDA __zpR+1
+169C  69 14         ADC #>__fn_arr_check_v_a
+169E  85 03         STA __zpAP+1
+16A0  A0 00         LDY #0
+16A2  B1 02         LDA (__zpAP),Y
+16A4  85 FB         STA __zpR
+16A6  C8            INY
+16A7  B1 02         LDA (__zpAP),Y
+16A9  85 FC         STA __zpR+1
+16AB  20 2C 08      JSR __rt_push
+16AE  AD 92 14      LDA __fn_arr_check_v_n
+16B1  85 FB         STA __zpR
+16B3  AD 93 14      LDA __fn_arr_check_v_n+1
+16B6  85 FC         STA __zpR+1
+16B8  20 2C 08      JSR __rt_push
+16BB  A9 0A         LDA #<10
+16BD  85 FB         STA __zpR
+16BF  A9 00         LDA #>10
+16C1  85 FC         STA __zpR+1
+16C3  20 4F 08      JSR __rt_pop2
+16C6  20 88 08      JSR __rt_mul16
+16C9  20 2C 08      JSR __rt_push
+16CC  AD 9C 14      LDA __fn_arr_check_v_i
+16CF  85 FB         STA __zpR
+16D1  AD 9D 14      LDA __fn_arr_check_v_i+1
+16D4  85 FC         STA __zpR+1
+16D6  20 4F 08      JSR __rt_pop2
+16D9  18            CLC
+16DA  A5 FD         LDA __zpR2
+16DC  65 FB         ADC __zpR
+16DE  85 FB         STA __zpR
+16E0  A5 FE         LDA __zpR2+1
+16E2  65 FC         ADC __zpR+1
+16E4  85 FC         STA __zpR+1
+16E6  20 4F 08      JSR __rt_pop2
+16E9  20 6B 09      JSR __rt_ne16
+16EC  A5 FB         LDA __zpR
+16EE  05 FC         ORA __zpR+1
+16F0  D0 03         BNE __L49
+16F2  4C 01 17      JMP __L47
+16F5  A9 00         LDA #<0
+16F7  85 FB         STA __zpR
+16F9  A9 00         LDA #>0
+16FB  85 FC         STA __zpR+1
+16FD  60            RTS
+16FE  4C 01 17      JMP __L48
+1701  AD 9C 14      LDA __fn_arr_check_v_i
+1704  85 FB         STA __zpR
+1706  AD 9D 14      LDA __fn_arr_check_v_i+1
+1709  85 FC         STA __zpR+1
+170B  20 2C 08      JSR __rt_push
+170E  A9 01         LDA #<1
+1710  85 FB         STA __zpR
+1712  A9 00         LDA #>1
+1714  85 FC         STA __zpR+1
+1716  20 4F 08      JSR __rt_pop2
+1719  18            CLC
+171A  A5 FD         LDA __zpR2
+171C  65 FB         ADC __zpR
+171E  85 FB         STA __zpR
+1720  A5 FE         LDA __zpR2+1
+1722  65 FC         ADC __zpR+1
+1724  85 FC         STA __zpR+1
+1726  A5 FB         LDA __zpR
+1728  8D 9C 14      STA __fn_arr_check_v_i
+172B  A5 FC         LDA __zpR+1
+172D  8D 9D 14      STA __fn_arr_check_v_i+1
+1730  4C 61 16      JMP __L43
+1733  A9 01         LDA #<1
+1735  85 FB         STA __zpR
+1737  A9 00         LDA #>1
+1739  85 FC         STA __zpR+1
+173B  60            RTS
+173C  60            RTS
+173F  AD 26 08      LDA __rt_csp
+1742  85 02         STA __zpAP
+1744  AD 27 08      LDA __rt_csp+1
+1747  85 03         STA __zpAP+1
+1749  A0 00         LDY #0
+174B  B9 3D 17      LDA __fn_rsum_frame,Y
+174E  91 02         STA (__zpAP),Y
+1750  C8            INY
+1751  C0 02         CPY #2
+1753  D0 F6         BNE __fn_rsum_pushfr_loop
+1755  18            CLC
+1756  AD 26 08      LDA __rt_csp
+1759  69 02         ADC #2
+175B  8D 26 08      STA __rt_csp
+175E  AD 27 08      LDA __rt_csp+1
+1761  69 00         ADC #0
+1763  8D 27 08      STA __rt_csp+1
+1766  4C 62 08      JMP __rt_cstack_check
+1769  38            SEC
+176A  AD 26 08      LDA __rt_csp
+176D  E9 02         SBC #2
+176F  8D 26 08      STA __rt_csp
+1772  85 02         STA __zpAP
+1774  AD 27 08      LDA __rt_csp+1
+1777  E9 00         SBC #0
+1779  8D 27 08      STA __rt_csp+1
+177C  85 03         STA __zpAP+1
+177E  A0 00         LDY #0
+1780  B1 02         LDA (__zpAP),Y
+1782  99 3D 17      STA __fn_rsum_frame,Y
+1785  C8            INY
+1786  C0 02         CPY #2
+1788  D0 F6         BNE __fn_rsum_popfr_loop
+178A  60            RTS
+178B  AD 3D 17      LDA __fn_rsum_v_n
+178E  85 FB         STA __zpR
+1790  AD 3E 17      LDA __fn_rsum_v_n+1
+1793  85 FC         STA __zpR+1
+1795  20 2C 08      JSR __rt_push
+1798  A9 00         LDA #<0
+179A  85 FB         STA __zpR
+179C  A9 00         LDA #>0
+179E  85 FC         STA __zpR+1
+17A0  20 4F 08      JSR __rt_pop2
+17A3  20 4F 09      JSR __rt_eq16
+17A6  A5 FB         LDA __zpR
+17A8  05 FC         ORA __zpR+1
+17AA  D0 03         BNE __L52
+17AC  4C BB 17      JMP __L50
+17AF  A9 00         LDA #<0
+17B1  85 FB         STA __zpR
+17B3  A9 00         LDA #>0
+17B5  85 FC         STA __zpR+1
+17B7  60            RTS
+17B8  4C BB 17      JMP __L51
+17BB  AD 3D 17      LDA __fn_rsum_v_n
+17BE  85 FB         STA __zpR
+17C0  AD 3E 17      LDA __fn_rsum_v_n+1
+17C3  85 FC         STA __zpR+1
+17C5  20 2C 08      JSR __rt_push
+17C8  20 3F 17      JSR __fn_rsum_pushframe
+17CB  AD 3D 17      LDA __fn_rsum_v_n
+17CE  85 FB         STA __zpR
+17D0  AD 3E 17      LDA __fn_rsum_v_n+1
+17D3  85 FC         STA __zpR+1
+17D5  20 2C 08      JSR __rt_push
+17D8  A9 01         LDA #<1
+17DA  85 FB         STA __zpR
+17DC  A9 00         LDA #>1
+17DE  85 FC         STA __zpR+1
+17E0  20 4F 08      JSR __rt_pop2
+17E3  38            SEC
+17E4  A5 FD         LDA __zpR2
+17E6  E5 FB         SBC __zpR
+17E8  85 FD         STA __zpR2
+17EA  A5 FE         LDA __zpR2+1
+17EC  E5 FC         SBC __zpR+1
+17EE  85 FC         STA __zpR+1
+17F0  A5 FD         LDA __zpR2
+17F2  85 FB         STA __zpR
+17F4  A5 FB         LDA __zpR
+17F6  8D 3D 17      STA __fn_rsum_v_n
+17F9  A5 FC         LDA __zpR+1
+17FB  8D 3E 17      STA __fn_rsum_v_n+1
+17FE  20 8B 17      JSR __fn_rsum
+1801  20 69 17      JSR __fn_rsum_popframe
+1804  20 4F 08      JSR __rt_pop2
+1807  18            CLC
+1808  A5 FD         LDA __zpR2
+180A  65 FB         ADC __zpR
+180C  85 FB         STA __zpR
+180E  A5 FE         LDA __zpR2+1
+1810  65 FC         ADC __zpR+1
+1812  85 FC         STA __zpR+1
+1814  60            RTS
+1815  60            RTS
+1818  AD 26 08      LDA __rt_csp
+181B  85 02         STA __zpAP
+181D  AD 27 08      LDA __rt_csp+1
+1820  85 03         STA __zpAP+1
+1822  A0 00         LDY #0
+1824  B9 16 18      LDA __fn_identity_frame,Y
+1827  91 02         STA (__zpAP),Y
+1829  C8            INY
+182A  C0 02         CPY #2
+182C  D0 F6         BNE __fn_identity_pushfr_loop
+182E  18            CLC
+182F  AD 26 08      LDA __rt_csp
+1832  69 02         ADC #2
+1834  8D 26 08      STA __rt_csp
+1837  AD 27 08      LDA __rt_csp+1
+183A  69 00         ADC #0
+183C  8D 27 08      STA __rt_csp+1
+183F  4C 62 08      JMP __rt_cstack_check
+1842  38            SEC
+1843  AD 26 08      LDA __rt_csp
+1846  E9 02         SBC #2
+1848  8D 26 08      STA __rt_csp
+184B  85 02         STA __zpAP
+184D  AD 27 08      LDA __rt_csp+1
+1850  E9 00         SBC #0
+1852  8D 27 08      STA __rt_csp+1
+1855  85 03         STA __zpAP+1
+1857  A0 00         LDY #0
+1859  B1 02         LDA (__zpAP),Y
+185B  99 16 18      STA __fn_identity_frame,Y
+185E  C8            INY
+185F  C0 02         CPY #2
+1861  D0 F6         BNE __fn_identity_popfr_loop
+1863  60            RTS
+1864  AD 16 18      LDA __fn_identity_v_x
+1867  85 FB         STA __zpR
+1869  AD 17 18      LDA __fn_identity_v_x+1
+186C  85 FC         STA __zpR+1
+186E  60            RTS
+186F  60            RTS
+1872  AD 26 08      LDA __rt_csp
+1875  85 02         STA __zpAP
+1877  AD 27 08      LDA __rt_csp+1
+187A  85 03         STA __zpAP+1
+187C  A0 00         LDY #0
+187E  B9 70 18      LDA __fn_main_frame,Y
+1881  91 02         STA (__zpAP),Y
+1883  C8            INY
+1884  C0 02         CPY #2
+1886  D0 F6         BNE __fn_main_pushfr_loop
+1888  18            CLC
+1889  AD 26 08      LDA __rt_csp
+188C  69 02         ADC #2
+188E  8D 26 08      STA __rt_csp
+1891  AD 27 08      LDA __rt_csp+1
+1894  69 00         ADC #0
+1896  8D 27 08      STA __rt_csp+1
+1899  4C 62 08      JMP __rt_cstack_check
+189C  38            SEC
+189D  AD 26 08      LDA __rt_csp
+18A0  E9 02         SBC #2
+18A2  8D 26 08      STA __rt_csp
+18A5  85 02         STA __zpAP
+18A7  AD 27 08      LDA __rt_csp+1
+18AA  E9 00         SBC #0
+18AC  8D 27 08      STA __rt_csp+1
+18AF  85 03         STA __zpAP+1
+18B1  A0 00         LDY #0
+18B3  B1 02         LDA (__zpAP),Y
+18B5  99 70 18      STA __fn_main_frame,Y
+18B8  C8            INY
+18B9  C0 02         CPY #2
+18BB  D0 F6         BNE __fn_main_popfr_loop
+18BD  60            RTS
+18BE  20 18 0D      JSR __fn_print_int_pushframe
+18C1  20 F9 0D      JSR __fn_fact_pushframe
+18C4  A9 05         LDA #<5
+18C6  85 FB         STA __zpR
+18C8  A9 00         LDA #>5
+18CA  85 FC         STA __zpR+1
+18CC  A5 FB         LDA __zpR
+18CE  8D F7 0D      STA __fn_fact_v_n
+18D1  A5 FC         LDA __zpR+1
+18D3  8D F8 0D      STA __fn_fact_v_n+1
+18D6  20 45 0E      JSR __fn_fact
+18D9  20 23 0E      JSR __fn_fact_popframe
+18DC  A5 FB         LDA __zpR
+18DE  8D 16 0D      STA __fn_print_int_v_n
+18E1  A5 FC         LDA __zpR+1
+18E3  8D 17 0D      STA __fn_print_int_v_n+1
+18E6  20 64 0D      JSR __fn_print_int
+18E9  20 42 0D      JSR __fn_print_int_popframe
+18EC  20 E4 0D      JSR __fn_nl_pushframe
+18EF  20 E6 0D      JSR __fn_nl
+18F2  20 E5 0D      JSR __fn_nl_popframe
+18F5  20 18 0D      JSR __fn_print_int_pushframe
+18F8  20 F9 0D      JSR __fn_fact_pushframe
+18FB  A9 07         LDA #<7
+18FD  85 FB         STA __zpR
+18FF  A9 00         LDA #>7
+1901  85 FC         STA __zpR+1
+1903  A5 FB         LDA __zpR
+1905  8D F7 0D      STA __fn_fact_v_n
+1908  A5 FC         LDA __zpR+1
+190A  8D F8 0D      STA __fn_fact_v_n+1
+190D  20 45 0E      JSR __fn_fact
+1910  20 23 0E      JSR __fn_fact_popframe
+1913  A5 FB         LDA __zpR
+1915  8D 16 0D      STA __fn_print_int_v_n
+1918  A5 FC         LDA __zpR+1
+191A  8D 17 0D      STA __fn_print_int_v_n+1
+191D  20 64 0D      JSR __fn_print_int
+1920  20 42 0D      JSR __fn_print_int_popframe
+1923  20 E4 0D      JSR __fn_nl_pushframe
+1926  20 E6 0D      JSR __fn_nl
+1929  20 E5 0D      JSR __fn_nl_popframe
+192C  20 18 0D      JSR __fn_print_int_pushframe
+192F  20 C8 0E      JSR __fn_fib_pushframe
+1932  A9 0A         LDA #<10
+1934  85 FB         STA __zpR
+1936  A9 00         LDA #>10
+1938  85 FC         STA __zpR+1
+193A  A5 FB         LDA __zpR
+193C  8D C6 0E      STA __fn_fib_v_n
+193F  A5 FC         LDA __zpR+1
+1941  8D C7 0E      STA __fn_fib_v_n+1
+1944  20 14 0F      JSR __fn_fib
+1947  20 F2 0E      JSR __fn_fib_popframe
+194A  A5 FB         LDA __zpR
+194C  8D 16 0D      STA __fn_print_int_v_n
+194F  A5 FC         LDA __zpR+1
+1951  8D 17 0D      STA __fn_print_int_v_n+1
+1954  20 64 0D      JSR __fn_print_int
+1957  20 42 0D      JSR __fn_print_int_popframe
+195A  20 E4 0D      JSR __fn_nl_pushframe
+195D  20 E6 0D      JSR __fn_nl
+1960  20 E5 0D      JSR __fn_nl_popframe
+1963  20 18 0D      JSR __fn_print_int_pushframe
+1966  20 C8 0E      JSR __fn_fib_pushframe
+1969  A9 0F         LDA #<15
+196B  85 FB         STA __zpR
+196D  A9 00         LDA #>15
+196F  85 FC         STA __zpR+1
+1971  A5 FB         LDA __zpR
+1973  8D C6 0E      STA __fn_fib_v_n
+1976  A5 FC         LDA __zpR+1
+1978  8D C7 0E      STA __fn_fib_v_n+1
+197B  20 14 0F      JSR __fn_fib
+197E  20 F2 0E      JSR __fn_fib_popframe
+1981  A5 FB         LDA __zpR
+1983  8D 16 0D      STA __fn_print_int_v_n
+1986  A5 FC         LDA __zpR+1
+1988  8D 17 0D      STA __fn_print_int_v_n+1
+198B  20 64 0D      JSR __fn_print_int
+198E  20 42 0D      JSR __fn_print_int_popframe
+1991  20 E4 0D      JSR __fn_nl_pushframe
+1994  20 E6 0D      JSR __fn_nl
+1997  20 E5 0D      JSR __fn_nl_popframe
+199A  20 18 0D      JSR __fn_print_int_pushframe
+199D  20 91 10      JSR __fn_is_even_pushframe
+19A0  A9 0A         LDA #<10
+19A2  85 FB         STA __zpR
+19A4  A9 00         LDA #>10
+19A6  85 FC         STA __zpR+1
+19A8  A5 FB         LDA __zpR
+19AA  8D 8F 10      STA __fn_is_even_v_n
+19AD  A5 FC         LDA __zpR+1
+19AF  8D 90 10      STA __fn_is_even_v_n+1
+19B2  20 DD 10      JSR __fn_is_even
+19B5  20 BB 10      JSR __fn_is_even_popframe
+19B8  A5 FB         LDA __zpR
+19BA  8D 16 0D      STA __fn_print_int_v_n
+19BD  A5 FC         LDA __zpR+1
+19BF  8D 17 0D      STA __fn_print_int_v_n+1
+19C2  20 64 0D      JSR __fn_print_int
+19C5  20 42 0D      JSR __fn_print_int_popframe
+19C8  20 E4 0D      JSR __fn_nl_pushframe
+19CB  20 E6 0D      JSR __fn_nl
+19CE  20 E5 0D      JSR __fn_nl_popframe
+19D1  20 18 0D      JSR __fn_print_int_pushframe
+19D4  20 91 10      JSR __fn_is_even_pushframe
+19D7  A9 07         LDA #<7
+19D9  85 FB         STA __zpR
+19DB  A9 00         LDA #>7
+19DD  85 FC         STA __zpR+1
+19DF  A5 FB         LDA __zpR
+19E1  8D 8F 10      STA __fn_is_even_v_n
+19E4  A5 FC         LDA __zpR+1
+19E6  8D 90 10      STA __fn_is_even_v_n+1
+19E9  20 DD 10      JSR __fn_is_even
+19EC  20 BB 10      JSR __fn_is_even_popframe
+19EF  A5 FB         LDA __zpR
+19F1  8D 16 0D      STA __fn_print_int_v_n
+19F4  A5 FC         LDA __zpR+1
+19F6  8D 17 0D      STA __fn_print_int_v_n+1
+19F9  20 64 0D      JSR __fn_print_int
+19FC  20 42 0D      JSR __fn_print_int_popframe
+19FF  20 E4 0D      JSR __fn_nl_pushframe
+1A02  20 E6 0D      JSR __fn_nl
+1A05  20 E5 0D      JSR __fn_nl_popframe
+1A08  20 18 0D      JSR __fn_print_int_pushframe
+1A0B  20 D5 0F      JSR __fn_is_odd_pushframe
+1A0E  A9 09         LDA #<9
+1A10  85 FB         STA __zpR
+1A12  A9 00         LDA #>9
+1A14  85 FC         STA __zpR+1
+1A16  A5 FB         LDA __zpR
+1A18  8D D3 0F      STA __fn_is_odd_v_n
+1A1B  A5 FC         LDA __zpR+1
+1A1D  8D D4 0F      STA __fn_is_odd_v_n+1
+1A20  20 21 10      JSR __fn_is_odd
+1A23  20 FF 0F      JSR __fn_is_odd_popframe
+1A26  A5 FB         LDA __zpR
+1A28  8D 16 0D      STA __fn_print_int_v_n
+1A2B  A5 FC         LDA __zpR+1
+1A2D  8D 17 0D      STA __fn_print_int_v_n+1
+1A30  20 64 0D      JSR __fn_print_int
+1A33  20 42 0D      JSR __fn_print_int_popframe
+1A36  20 E4 0D      JSR __fn_nl_pushframe
+1A39  20 E6 0D      JSR __fn_nl
+1A3C  20 E5 0D      JSR __fn_nl_popframe
+1A3F  20 4F 11      JSR __fn_rprint_uint_pushframe
+1A42  A9 09         LDA #<9
+1A44  85 FB         STA __zpR
+1A46  A9 00         LDA #>9
+1A48  85 FC         STA __zpR+1
+1A4A  A5 FB         LDA __zpR
+1A4C  8D 4B 11      STA __fn_rprint_uint_v_n
+1A4F  A5 FC         LDA __zpR+1
+1A51  8D 4C 11      STA __fn_rprint_uint_v_n+1
+1A54  20 9B 11      JSR __fn_rprint_uint
+1A57  20 79 11      JSR __fn_rprint_uint_popframe
+1A5A  20 E4 0D      JSR __fn_nl_pushframe
+1A5D  20 E6 0D      JSR __fn_nl
+1A60  20 E5 0D      JSR __fn_nl_popframe
+1A63  20 4F 11      JSR __fn_rprint_uint_pushframe
+1A66  A9 98         LDA #<408
+1A68  85 FB         STA __zpR
+1A6A  A9 01         LDA #>408
+1A6C  85 FC         STA __zpR+1
+1A6E  A5 FB         LDA __zpR
+1A70  8D 4B 11      STA __fn_rprint_uint_v_n
+1A73  A5 FC         LDA __zpR+1
+1A75  8D 4C 11      STA __fn_rprint_uint_v_n+1
+1A78  20 9B 11      JSR __fn_rprint_uint
+1A7B  20 79 11      JSR __fn_rprint_uint_popframe
+1A7E  20 E4 0D      JSR __fn_nl_pushframe
+1A81  20 E6 0D      JSR __fn_nl
+1A84  20 E5 0D      JSR __fn_nl_popframe
+1A87  20 4F 11      JSR __fn_rprint_uint_pushframe
+1A8A  A9 69         LDA #<31337
+1A8C  85 FB         STA __zpR
+1A8E  A9 7A         LDA #>31337
+1A90  85 FC         STA __zpR+1
+1A92  A5 FB         LDA __zpR
+1A94  8D 4B 11      STA __fn_rprint_uint_v_n
+1A97  A5 FC         LDA __zpR+1
+1A99  8D 4C 11      STA __fn_rprint_uint_v_n+1
+1A9C  20 9B 11      JSR __fn_rprint_uint
+1A9F  20 79 11      JSR __fn_rprint_uint_popframe
+1AA2  20 E4 0D      JSR __fn_nl_pushframe
+1AA5  20 E6 0D      JSR __fn_nl
+1AA8  20 E5 0D      JSR __fn_nl_popframe
+1AAB  20 18 0D      JSR __fn_print_int_pushframe
+1AAE  20 57 12      JSR __fn_rstrlen_pushframe
+1AB1  A9 F4         LDA #<__str_2
+1AB3  85 FB         STA __zpR
+1AB5  A9 1D         LDA #>__str_2
+1AB7  85 FC         STA __zpR+1
+1AB9  A5 FB         LDA __zpR
+1ABB  8D 55 12      STA __fn_rstrlen_v_s
+1ABE  A5 FC         LDA __zpR+1
+1AC0  8D 56 12      STA __fn_rstrlen_v_s+1
+1AC3  20 A3 12      JSR __fn_rstrlen
+1AC6  20 81 12      JSR __fn_rstrlen_popframe
+1AC9  A5 FB         LDA __zpR
+1ACB  8D 16 0D      STA __fn_print_int_v_n
+1ACE  A5 FC         LDA __zpR+1
+1AD0  8D 17 0D      STA __fn_print_int_v_n+1
+1AD3  20 64 0D      JSR __fn_print_int
+1AD6  20 42 0D      JSR __fn_print_int_popframe
+1AD9  20 E4 0D      JSR __fn_nl_pushframe
+1ADC  20 E6 0D      JSR __fn_nl
+1ADF  20 E5 0D      JSR __fn_nl_popframe
+1AE2  20 18 0D      JSR __fn_print_int_pushframe
+1AE5  20 57 12      JSR __fn_rstrlen_pushframe
+1AE8  A9 FA         LDA #<__str_3
+1AEA  85 FB         STA __zpR
+1AEC  A9 1D         LDA #>__str_3
+1AEE  85 FC         STA __zpR+1
+1AF0  A5 FB         LDA __zpR
+1AF2  8D 55 12      STA __fn_rstrlen_v_s
+1AF5  A5 FC         LDA __zpR+1
+1AF7  8D 56 12      STA __fn_rstrlen_v_s+1
+1AFA  20 A3 12      JSR __fn_rstrlen
+1AFD  20 81 12      JSR __fn_rstrlen_popframe
+1B00  A5 FB         LDA __zpR
+1B02  8D 16 0D      STA __fn_print_int_v_n
+1B05  A5 FC         LDA __zpR+1
+1B07  8D 17 0D      STA __fn_print_int_v_n+1
+1B0A  20 64 0D      JSR __fn_print_int
+1B0D  20 42 0D      JSR __fn_print_int_popframe
+1B10  20 E4 0D      JSR __fn_nl_pushframe
+1B13  20 E6 0D      JSR __fn_nl
+1B16  20 E5 0D      JSR __fn_nl_popframe
+1B19  A9 00         LDA #<0
+1B1B  85 FB         STA __zpR
+1B1D  A9 00         LDA #>0
+1B1F  85 FC         STA __zpR+1
+1B21  A5 FB         LDA __zpR
+1B23  8D 70 18      STA __fn_main_v_c
+1B26  A5 FC         LDA __zpR+1
+1B28  8D 71 18      STA __fn_main_v_c+1
+1B2B  20 18 0D      JSR __fn_print_int_pushframe
+1B2E  20 3E 13      JSR __fn_depth_count_pushframe
+1B31  A9 06         LDA #<6
+1B33  85 FB         STA __zpR
+1B35  A9 00         LDA #>6
+1B37  85 FC         STA __zpR+1
+1B39  A5 FB         LDA __zpR
+1B3B  8D 3A 13      STA __fn_depth_count_v_n
+1B3E  A5 FC         LDA __zpR+1
+1B40  8D 3B 13      STA __fn_depth_count_v_n+1
+1B43  A9 70         LDA #<__fn_main_v_c
+1B45  85 FB         STA __zpR
+1B47  A9 18         LDA #>__fn_main_v_c
+1B49  85 FC         STA __zpR+1
+1B4B  A5 FB         LDA __zpR
+1B4D  8D 3C 13      STA __fn_depth_count_v_counter
+1B50  A5 FC         LDA __zpR+1
+1B52  8D 3D 13      STA __fn_depth_count_v_counter+1
+1B55  20 8A 13      JSR __fn_depth_count
+1B58  20 68 13      JSR __fn_depth_count_popframe
+1B5B  A5 FB         LDA __zpR
+1B5D  8D 16 0D      STA __fn_print_int_v_n
+1B60  A5 FC         LDA __zpR+1
+1B62  8D 17 0D      STA __fn_print_int_v_n+1
+1B65  20 64 0D      JSR __fn_print_int
+1B68  20 42 0D      JSR __fn_print_int_popframe
+1B6B  20 E4 0D      JSR __fn_nl_pushframe
+1B6E  20 E6 0D      JSR __fn_nl
+1B71  20 E5 0D      JSR __fn_nl_popframe
+1B74  20 18 0D      JSR __fn_print_int_pushframe
+1B77  AD 70 18      LDA __fn_main_v_c
+1B7A  85 FB         STA __zpR
+1B7C  AD 71 18      LDA __fn_main_v_c+1
+1B7F  85 FC         STA __zpR+1
+1B81  A5 FB         LDA __zpR
+1B83  8D 16 0D      STA __fn_print_int_v_n
+1B86  A5 FC         LDA __zpR+1
+1B88  8D 17 0D      STA __fn_print_int_v_n+1
+1B8B  20 64 0D      JSR __fn_print_int
+1B8E  20 42 0D      JSR __fn_print_int_popframe
+1B91  20 E4 0D      JSR __fn_nl_pushframe
+1B94  20 E6 0D      JSR __fn_nl
+1B97  20 E5 0D      JSR __fn_nl_popframe
+1B9A  20 18 0D      JSR __fn_print_int_pushframe
+1B9D  20 9E 14      JSR __fn_arr_check_pushframe
+1BA0  A9 05         LDA #<5
+1BA2  85 FB         STA __zpR
+1BA4  A9 00         LDA #>5
+1BA6  85 FC         STA __zpR+1
+1BA8  A5 FB         LDA __zpR
+1BAA  8D 92 14      STA __fn_arr_check_v_n
+1BAD  A5 FC         LDA __zpR+1
+1BAF  8D 93 14      STA __fn_arr_check_v_n+1
+1BB2  20 EA 14      JSR __fn_arr_check
+1BB5  20 C8 14      JSR __fn_arr_check_popframe
+1BB8  A5 FB         LDA __zpR
+1BBA  8D 16 0D      STA __fn_print_int_v_n
+1BBD  A5 FC         LDA __zpR+1
+1BBF  8D 17 0D      STA __fn_print_int_v_n+1
+1BC2  20 64 0D      JSR __fn_print_int
+1BC5  20 42 0D      JSR __fn_print_int_popframe
+1BC8  20 E4 0D      JSR __fn_nl_pushframe
+1BCB  20 E6 0D      JSR __fn_nl
+1BCE  20 E5 0D      JSR __fn_nl_popframe
+1BD1  20 18 0D      JSR __fn_print_int_pushframe
+1BD4  20 3F 17      JSR __fn_rsum_pushframe
+1BD7  A9 50         LDA #<80
+1BD9  85 FB         STA __zpR
+1BDB  A9 00         LDA #>80
+1BDD  85 FC         STA __zpR+1
+1BDF  A5 FB         LDA __zpR
+1BE1  8D 3D 17      STA __fn_rsum_v_n
+1BE4  A5 FC         LDA __zpR+1
+1BE6  8D 3E 17      STA __fn_rsum_v_n+1
+1BE9  20 8B 17      JSR __fn_rsum
+1BEC  20 69 17      JSR __fn_rsum_popframe
+1BEF  A5 FB         LDA __zpR
+1BF1  8D 16 0D      STA __fn_print_int_v_n
+1BF4  A5 FC         LDA __zpR+1
+1BF6  8D 17 0D      STA __fn_print_int_v_n+1
+1BF9  20 64 0D      JSR __fn_print_int
+1BFC  20 42 0D      JSR __fn_print_int_popframe
+1BFF  20 E4 0D      JSR __fn_nl_pushframe
+1C02  20 E6 0D      JSR __fn_nl
+1C05  20 E5 0D      JSR __fn_nl_popframe
+1C08  A9 02         LDA #<2
+1C0A  85 FB         STA __zpR
+1C0C  A9 00         LDA #>2
+1C0E  85 FC         STA __zpR+1
+1C10  06 FB         ASL __zpR
+1C12  26 FC         ROL __zpR+1
+1C14  18            CLC
+1C15  A5 FB         LDA __zpR
+1C17  69 EC         ADC #<__g_garr
+1C19  85 02         STA __zpAP
+1C1B  A5 FC         LDA __zpR+1
+1C1D  69 0A         ADC #>__g_garr
+1C1F  85 03         STA __zpAP+1
+1C21  A5 02         LDA __zpAP
+1C23  85 FB         STA __zpR
+1C25  A5 03         LDA __zpAP+1
+1C27  85 FC         STA __zpR+1
+1C29  20 2C 08      JSR __rt_push
+1C2C  A9 01         LDA #<1
+1C2E  85 FB         STA __zpR
+1C30  A9 00         LDA #>1
+1C32  85 FC         STA __zpR+1
+1C34  06 FB         ASL __zpR
+1C36  26 FC         ROL __zpR+1
+1C38  18            CLC
+1C39  A5 FB         LDA __zpR
+1C3B  69 F4         ADC #<__g_gother
+1C3D  85 02         STA __zpAP
+1C3F  A5 FC         LDA __zpR+1
+1C41  69 0A         ADC #>__g_gother
+1C43  85 03         STA __zpAP+1
+1C45  A5 02         LDA __zpAP
+1C47  85 FB         STA __zpR
+1C49  A5 03         LDA __zpAP+1
+1C4B  85 FC         STA __zpR+1
+1C4D  20 2C 08      JSR __rt_push
+1C50  20 18 18      JSR __fn_identity_pushframe
+1C53  A9 07         LDA #<7
+1C55  85 FB         STA __zpR
+1C57  A9 00         LDA #>7
+1C59  85 FC         STA __zpR+1
+1C5B  A5 FB         LDA __zpR
+1C5D  8D 16 18      STA __fn_identity_v_x
+1C60  A5 FC         LDA __zpR+1
+1C62  8D 17 18      STA __fn_identity_v_x+1
+1C65  20 64 18      JSR __fn_identity
+1C68  20 42 18      JSR __fn_identity_popframe
+1C6B  20 4F 08      JSR __rt_pop2
+1C6E  A5 FD         LDA __zpR2
+1C70  85 02         STA __zpAP
+1C72  A5 FE         LDA __zpR2+1
+1C74  85 03         STA __zpAP+1
+1C76  A0 00         LDY #0
+1C78  A5 FB         LDA __zpR
+1C7A  91 02         STA (__zpAP),Y
+1C7C  C8            INY
+1C7D  A5 FC         LDA __zpR+1
+1C7F  91 02         STA (__zpAP),Y
+1C81  20 2C 08      JSR __rt_push
+1C84  A9 00         LDA #<0
+1C86  85 FB         STA __zpR
+1C88  A9 00         LDA #>0
+1C8A  85 FC         STA __zpR+1
+1C8C  20 4F 08      JSR __rt_pop2
+1C8F  18            CLC
+1C90  A5 FD         LDA __zpR2
+1C92  65 FB         ADC __zpR
+1C94  85 FB         STA __zpR
+1C96  A5 FE         LDA __zpR2+1
+1C98  65 FC         ADC __zpR+1
+1C9A  85 FC         STA __zpR+1
+1C9C  20 4F 08      JSR __rt_pop2
+1C9F  A5 FD         LDA __zpR2
+1CA1  85 02         STA __zpAP
+1CA3  A5 FE         LDA __zpR2+1
+1CA5  85 03         STA __zpAP+1
+1CA7  A0 00         LDY #0
+1CA9  A5 FB         LDA __zpR
+1CAB  91 02         STA (__zpAP),Y
+1CAD  C8            INY
+1CAE  A5 FC         LDA __zpR+1
+1CB0  91 02         STA (__zpAP),Y
+1CB2  20 18 0D      JSR __fn_print_int_pushframe
+1CB5  A9 02         LDA #<2
+1CB7  85 FB         STA __zpR
+1CB9  A9 00         LDA #>2
+1CBB  85 FC         STA __zpR+1
+1CBD  06 FB         ASL __zpR
+1CBF  26 FC         ROL __zpR+1
+1CC1  18            CLC
+1CC2  A5 FB         LDA __zpR
+1CC4  69 EC         ADC #<__g_garr
+1CC6  85 02         STA __zpAP
+1CC8  A5 FC         LDA __zpR+1
+1CCA  69 0A         ADC #>__g_garr
+1CCC  85 03         STA __zpAP+1
+1CCE  A0 00         LDY #0
+1CD0  B1 02         LDA (__zpAP),Y
+1CD2  85 FB         STA __zpR
+1CD4  C8            INY
+1CD5  B1 02         LDA (__zpAP),Y
+1CD7  85 FC         STA __zpR+1
+1CD9  A5 FB         LDA __zpR
+1CDB  8D 16 0D      STA __fn_print_int_v_n
+1CDE  A5 FC         LDA __zpR+1
+1CE0  8D 17 0D      STA __fn_print_int_v_n+1
+1CE3  20 64 0D      JSR __fn_print_int
+1CE6  20 42 0D      JSR __fn_print_int_popframe
+1CE9  20 E4 0D      JSR __fn_nl_pushframe
+1CEC  20 E6 0D      JSR __fn_nl
+1CEF  20 E5 0D      JSR __fn_nl_popframe
+1CF2  20 18 0D      JSR __fn_print_int_pushframe
+1CF5  A9 01         LDA #<1
+1CF7  85 FB         STA __zpR
+1CF9  A9 00         LDA #>1
+1CFB  85 FC         STA __zpR+1
+1CFD  06 FB         ASL __zpR
+1CFF  26 FC         ROL __zpR+1
+1D01  18            CLC
+1D02  A5 FB         LDA __zpR
+1D04  69 F4         ADC #<__g_gother
+1D06  85 02         STA __zpAP
+1D08  A5 FC         LDA __zpR+1
+1D0A  69 0A         ADC #>__g_gother
+1D0C  85 03         STA __zpAP+1
+1D0E  A0 00         LDY #0
+1D10  B1 02         LDA (__zpAP),Y
+1D12  85 FB         STA __zpR
+1D14  C8            INY
+1D15  B1 02         LDA (__zpAP),Y
+1D17  85 FC         STA __zpR+1
+1D19  A5 FB         LDA __zpR
+1D1B  8D 16 0D      STA __fn_print_int_v_n
+1D1E  A5 FC         LDA __zpR+1
+1D20  8D 17 0D      STA __fn_print_int_v_n+1
+1D23  20 64 0D      JSR __fn_print_int
+1D26  20 42 0D      JSR __fn_print_int_popframe
+1D29  20 E4 0D      JSR __fn_nl_pushframe
+1D2C  20 E6 0D      JSR __fn_nl
+1D2F  20 E5 0D      JSR __fn_nl_popframe
+1D32  A9 FB         LDA #<__str_4
+1D34  85 FB         STA __zpR
+1D36  A9 1D         LDA #>__str_4
+1D38  85 FC         STA __zpR+1
+1D3A  20 C1 0A      JSR __rt_puts
+1D3D  60            RTS
+
+Symbol table:
+  __CHROUT             = $FFD2
+  __L0                 = $0B8A
+  __L1                 = $0B8A
+  __L10                = $0DE3
+  __L11                = $0D88
+  __L12                = $0E75
+  __L13                = $0E75
+  __L14                = $0E69
+  __L15                = $0F46
+  __L16                = $0F46
+  __L17                = $0F38
+  __L18                = $1051
+  __L19                = $1051
+  __L2                 = $0B76
+  __L20                = $1045
+  __L21                = $110D
+  __L22                = $110D
+  __L23                = $1101
+  __L24                = $1227
+  __L25                = $1227
+  __L26                = $11EE
+  __L27                = $12E5
+  __L28                = $12E5
+  __L29                = $12D9
+  __L3                 = $0B9C
+  __L30                = $1425
+  __L31                = $1425
+  __L32                = $1419
+  __L33                = $14FC
+  __L34                = $15C6
+  __L35                = $1594
+  __L36                = $1520
+  __L37                = $164F
+  __L38                = $164F
+  __L39                = $15EA
+  __L4                 = $0C77
+  __L40                = $164C
+  __L41                = $164C
+  __L42                = $1640
+  __L43                = $1661
+  __L44                = $1733
+  __L45                = $1701
+  __L46                = $1685
+  __L47                = $1701
+  __L48                = $1701
+  __L49                = $16F5
+  __L5                 = $0BC0
+  __L50                = $17BB
+  __L51                = $17BB
+  __L52                = $17AF
+  __L6                 = $0C77
+  __L7                 = $0D15
+  __L8                 = $0C9B
+  __L9                 = $0DC6
+  __fn_arr_check       = $14EA
+  __fn_arr_check_frame = $1492
+  __fn_arr_check_popfr_loop = $14DF
+  __fn_arr_check_popframe = $14C8
+  __fn_arr_check_pushfr_loop = $14AA
+  __fn_arr_check_pushframe = $149E
+  __fn_arr_check_v_a   = $1494
+  __fn_arr_check_v_i   = $149C
+  __fn_arr_check_v_n   = $1492
+  __fn_depth_count     = $138A
+  __fn_depth_count_frame = $133A
+  __fn_depth_count_popfr_loop = $137F
+  __fn_depth_count_popframe = $1368
+  __fn_depth_count_pushfr_loop = $134A
+  __fn_depth_count_pushframe = $133E
+  __fn_depth_count_v_counter = $133C
+  __fn_depth_count_v_n = $133A
+  __fn_fact            = $0E45
+  __fn_fact_frame      = $0DF7
+  __fn_fact_popfr_loop = $0E3A
+  __fn_fact_popframe   = $0E23
+  __fn_fact_pushfr_loop = $0E05
+  __fn_fact_pushframe  = $0DF9
+  __fn_fact_v_n        = $0DF7
+  __fn_fib             = $0F14
+  __fn_fib_frame       = $0EC6
+  __fn_fib_popfr_loop  = $0F09
+  __fn_fib_popframe    = $0EF2
+  __fn_fib_pushfr_loop = $0ED4
+  __fn_fib_pushframe   = $0EC8
+  __fn_fib_v_n         = $0EC6
+  __fn_identity        = $1864
+  __fn_identity_frame  = $1816
+  __fn_identity_popfr_loop = $1859
+  __fn_identity_popframe = $1842
+  __fn_identity_pushfr_loop = $1824
+  __fn_identity_pushframe = $1818
+  __fn_identity_v_x    = $1816
+  __fn_is_even         = $10DD
+  __fn_is_even_frame   = $108F
+  __fn_is_even_popfr_loop = $10D2
+  __fn_is_even_popframe = $10BB
+  __fn_is_even_pushfr_loop = $109D
+  __fn_is_even_pushframe = $1091
+  __fn_is_even_v_n     = $108F
+  __fn_is_odd          = $1021
+  __fn_is_odd_frame    = $0FD3
+  __fn_is_odd_popfr_loop = $1016
+  __fn_is_odd_popframe = $0FFF
+  __fn_is_odd_pushfr_loop = $0FE1
+  __fn_is_odd_pushframe = $0FD5
+  __fn_is_odd_v_n      = $0FD3
+  __fn_main            = $18BE
+  __fn_main_frame      = $1870
+  __fn_main_popfr_loop = $18B3
+  __fn_main_popframe   = $189C
+  __fn_main_pushfr_loop = $187E
+  __fn_main_pushframe  = $1872
+  __fn_main_v_c        = $1870
+  __fn_nl              = $0DE6
+  __fn_nl_frame        = $0DE4
+  __fn_nl_popframe     = $0DE5
+  __fn_nl_pushframe    = $0DE4
+  __fn_print_int       = $0D64
+  __fn_print_int_frame = $0D16
+  __fn_print_int_popfr_loop = $0D59
+  __fn_print_int_popframe = $0D42
+  __fn_print_int_pushfr_loop = $0D24
+  __fn_print_int_pushframe = $0D18
+  __fn_print_int_v_n   = $0D16
+  __fn_print_uint      = $0B52
+  __fn_print_uint_frame = $0AFC
+  __fn_print_uint_popfr_loop = $0B47
+  __fn_print_uint_popframe = $0B30
+  __fn_print_uint_pushfr_loop = $0B12
+  __fn_print_uint_pushframe = $0B06
+  __fn_print_uint_v_buf = $0AFE
+  __fn_print_uint_v_i  = $0B04
+  __fn_print_uint_v_n  = $0AFC
+  __fn_rprint_uint     = $119B
+  __fn_rprint_uint_frame = $114B
+  __fn_rprint_uint_popfr_loop = $1190
+  __fn_rprint_uint_popframe = $1179
+  __fn_rprint_uint_pushfr_loop = $115B
+  __fn_rprint_uint_pushframe = $114F
+  __fn_rprint_uint_v_digit = $114D
+  __fn_rprint_uint_v_n = $114B
+  __fn_rstrlen         = $12A3
+  __fn_rstrlen_frame   = $1255
+  __fn_rstrlen_popfr_loop = $1298
+  __fn_rstrlen_popframe = $1281
+  __fn_rstrlen_pushfr_loop = $1263
+  __fn_rstrlen_pushframe = $1257
+  __fn_rstrlen_v_s     = $1255
+  __fn_rsum            = $178B
+  __fn_rsum_frame      = $173D
+  __fn_rsum_popfr_loop = $1780
+  __fn_rsum_popframe   = $1769
+  __fn_rsum_pushfr_loop = $174B
+  __fn_rsum_pushframe  = $173F
+  __fn_rsum_v_n        = $173D
+  __g_g_calls          = $0AEA
+  __g_garr             = $0AEC
+  __g_gother           = $0AF4
+  __rt_csc_halt        = $0884
+  __rt_csc_ok          = $0887
+  __rt_csc_overflow    = $0879
+  __rt_csp             = $0826
+  __rt_cstack          = $1F01
+  __rt_cstack_check    = $0862
+  __rt_eq16            = $094F
+  __rt_eq16_ne         = $0964
+  __rt_ge16            = $09B8
+  __rt_ge16_t          = $09C4
+  __rt_gt16            = $09CD
+  __rt_gt16_t          = $09D9
+  __rt_le16            = $09E2
+  __rt_le16_t          = $09EE
+  __rt_lt16            = $09A3
+  __rt_lt16_t          = $09AF
+  __rt_mul16           = $0888
+  __rt_mul16_loop      = $0892
+  __rt_mul16_noadd     = $08A9
+  __rt_ne16            = $096B
+  __rt_ne16_ne         = $097E
+  __rt_neg_r           = $08F8
+  __rt_neg_r2          = $08E9
+  __rt_neg_t0          = $0907
+  __rt_pop2            = $084F
+  __rt_push            = $082C
+  __rt_push_halt       = $084B
+  __rt_push_ok         = $084E
+  __rt_puts            = $0AC1
+  __rt_puts_done       = $0AE9
+  __rt_puts_loop       = $0AC9
+  __rt_sdivmod16       = $091A
+  __rt_sdm_d1          = $092C
+  __rt_sdm_d2          = $0936
+  __rt_sdm_qdone       = $0946
+  __rt_sdm_rdone       = $094E
+  __rt_shl16           = $09F7
+  __rt_shl16_done      = $0A0D
+  __rt_shl16_loop      = $0A01
+  __rt_shr16           = $0A0E
+  __rt_shr16_done      = $0A28
+  __rt_shr16_loop      = $0A18
+  __rt_spidx           = $0825
+  __rt_stack           = $1E01
+  __rt_sub_r2r         = $0987
+  __rt_sub_r2r_ok      = $0994
+  __rt_sub_rr2         = $0995
+  __rt_sub_rr2_ok      = $09A2
+  __rt_topetscii       = $0A29
+  __rt_tp_done         = $0A48
+  __rt_tp_notlower     = $0A3B
+  __rt_udiv16          = $08BB
+  __rt_udiv16_loop     = $08C5
+  __rt_udiv16_skip     = $08E5
+  __rt_uge16           = $0AA3
+  __rt_uge16_f         = $0ABA
+  __rt_uge16_t         = $0AB1
+  __rt_ugt16           = $0A67
+  __rt_ugt16_f         = $0A75
+  __rt_ugt16_t         = $0A7C
+  __rt_ule16           = $0A85
+  __rt_ule16_f         = $0A9C
+  __rt_ule16_t         = $0A93
+  __rt_ult16           = $0A49
+  __rt_ult16_f         = $0A57
+  __rt_ult16_t         = $0A5E
+  __str_0              = $1D3E
+  __str_1              = $1D93
+  __str_2              = $1DF4
+  __str_3              = $1DFA
+  __str_4              = $1DFB
+  __zpAP               = $0002
+  __zpR                = $00FB
+  __zpR2               = $00FD
+  __zpT0               = $082A
+  __zpT1               = $0828

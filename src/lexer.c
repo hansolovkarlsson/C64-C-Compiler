@@ -43,6 +43,106 @@ static void tok_push(Token t) {
 static int is_id_start(int c) { return isalpha(c) || c == '_'; }
 static int is_id_char(int c)  { return isalnum(c) || c == '_'; }
 
+/* ===================================================================
+ * #include support
+ * ===================================================================
+ * See cc64.h's "HOW #include WORKS" for the design in one paragraph.
+ * Everything below is plain path-string manipulation, kept dependency-
+ * free on purpose: no libgen.h dirname() (not part of C99), no
+ * realpath() (POSIX, and would need a Windows equivalent) - just
+ * enough '/' splitting to find files relative to each other, which is
+ * all a small, single-platform-convention tool like this needs. Paths
+ * are always compared and joined as given, not canonicalized, so
+ * `#include "foo.h"` and `#include "./foo.h"` would (rarely, and
+ * harmlessly beyond a little wasted work) be treated as different
+ * files if a program mixed both spellings.
+ * =================================================================== */
+
+#define MAX_INCLUDE_DIRS 32
+static char *g_include_dirs[MAX_INCLUDE_DIRS];
+static int g_nincludedirs = 0;
+
+void add_include_dir(const char *dir) {
+    if (g_nincludedirs >= MAX_INCLUDE_DIRS) fatal(0, "too many -I include directories");
+    g_include_dirs[g_nincludedirs++] = xstrdup(dir);
+}
+
+#define MAX_INCLUDED_FILES 256
+static char *g_included[MAX_INCLUDED_FILES];
+static int g_nincluded = 0;
+
+static int already_included(const char *resolved_path) {
+    for (int i = 0; i < g_nincluded; i++)
+        if (strcmp(g_included[i], resolved_path) == 0) return 1;
+    return 0;
+}
+static void mark_included(const char *resolved_path) {
+    if (g_nincluded >= MAX_INCLUDED_FILES) fatal(0, "too many #include'd files (limit %d)", MAX_INCLUDED_FILES);
+    g_included[g_nincluded++] = xstrdup(resolved_path);
+}
+
+/* The directory containing `path` - "foo/bar/baz.h" -> "foo/bar",
+ * "baz.h" (no slash) -> ".". Used so `#include "x.h"` inside some
+ * lib/a.h looks for x.h next to a.h, not next to whatever file is
+ * being compiled at the top level. */
+static char *dirname_of(const char *path) {
+    const char *slash = strrchr(path, '/');
+    if (!slash) return xstrdup(".");
+    size_t len = (size_t)(slash - path);
+    char *d = xmalloc(len + 1);
+    memcpy(d, path, len);
+    d[len] = '\0';
+    return d;
+}
+
+static char *join_path(const char *dir, const char *name) {
+    size_t dl = strlen(dir), nl = strlen(name);
+    char *r = xmalloc(dl + 1 + nl + 1);
+    memcpy(r, dir, dl);
+    r[dl] = '/';
+    memcpy(r + dl + 1, name, nl + 1);
+    return r;
+}
+
+static int file_exists(const char *path) {
+    FILE *f = fopen(path, "rb");
+    if (!f) return 0;
+    fclose(f);
+    return 1;
+}
+
+static int lex_string(const char *src, const char *base_dir);
+
+/* Resolves `fname` to an actual file and lexes it in place, unless
+ * it's already been included anywhere in this compile (in which case
+ * this is a silent no-op - see the include-once note above). */
+static void do_include(const char *fname, int angled, const char *base_dir, int line) {
+    char *resolved = NULL;
+    if (!angled) {
+        char *candidate = join_path(base_dir, fname);
+        if (file_exists(candidate)) resolved = candidate;
+        else free(candidate);
+    }
+    if (!resolved) {
+        for (int i = 0; i < g_nincludedirs; i++) {
+            char *candidate = join_path(g_include_dirs[i], fname);
+            if (file_exists(candidate)) { resolved = candidate; break; }
+            free(candidate);
+        }
+    }
+    if (!resolved)
+        fatal(line, "cannot find include file '%s' (looked%s in the -I search path)",
+                     fname, angled ? "" : " next to the including file and");
+    if (already_included(resolved)) { free(resolved); return; }
+    mark_included(resolved);
+    char *inc_src = read_file(resolved);
+    char *inc_dir = dirname_of(resolved);
+    lex_string(inc_src, inc_dir);
+    free(inc_src);
+    free(inc_dir);
+    free(resolved);
+}
+
 /* A linear scan through this table is plenty fast for ~10 keywords;
  * no need for a hash table or a generated trie at this scale. Every
  * identifier the lexer reads gets checked against this list to decide
@@ -80,8 +180,14 @@ static int read_escape(const char *s, size_t *i, size_t n, int line) {
  * outer while loop (except for whitespace and comments, which are
  * consumed but produce no token). Tracks source line numbers as it
  * goes, purely so later error messages can say "line 42" instead of
- * "somewhere in your file". */
-void lex(const char *src) {
+ * "somewhere in your file". Returns the line count reached, so the
+ * outermost caller (lex_file()) can use it for the final EOF token.
+ *
+ * `base_dir` is the directory `src` came from, used to resolve any
+ * `#include "..."` (quoted) directives found in it - see do_include()
+ * above and lex_file() below for the recursive-splicing mechanism
+ * this is one piece of. */
+static int lex_string(const char *src, const char *base_dir) {
     size_t n = strlen(src);
     size_t i = 0;
     int line = 1;
@@ -103,6 +209,55 @@ void lex(const char *src) {
             i += 2;
             continue;
         }
+
+        /* Preprocessor directive. cc64 doesn't use '#' for anything
+         * else, so any '#' encountered here unambiguously starts one -
+         * unlike real C, this doesn't require it to be the first
+         * non-whitespace character on its line, which is a small,
+         * harmless simplification. */
+        if (c == '#') {
+            i++;
+            while (i < n && (src[i] == ' ' || src[i] == '\t')) i++;
+            size_t ds = i;
+            while (i < n && is_id_char((unsigned char)src[i])) i++;
+            size_t dlen = i - ds;
+            if (dlen == 0) fatal(line, "expected a preprocessor directive after '#'");
+            char directive[32];
+            if (dlen >= sizeof(directive)) fatal(line, "unknown preprocessor directive");
+            memcpy(directive, src + ds, dlen); directive[dlen] = '\0';
+            if (strcmp(directive, "include") != 0)
+                fatal(line, "cc64 only supports #include, not #%s", directive);
+            while (i < n && (src[i] == ' ' || src[i] == '\t')) i++;
+            if (i >= n) fatal(line, "expected \"filename\" or <filename> after #include");
+            int angled;
+            char openc = src[i], closec;
+            if (openc == '"') closec = '"';
+            else if (openc == '<') closec = '>';
+            else { fatal(line, "expected \"filename\" or <filename> after #include"); closec = 0; }
+            angled = (openc == '<');
+            i++;
+            size_t fs = i;
+            while (i < n && src[i] != closec && src[i] != '\n') i++;
+            if (i >= n || src[i] != closec) fatal(line, "unterminated #include filename");
+            size_t flen = i - fs;
+            char *fname = xmalloc(flen + 1);
+            memcpy(fname, src + fs, flen); fname[flen] = '\0';
+            i++; /* consume the closing quote/angle-bracket */
+            /* Deliberately NOT skipping to end-of-line here: a
+             * trailing comment after the filename can span multiple
+             * lines, and this loop's own comment handling at the top
+             * already knows how to skip both comment styles correctly -
+             * a second, naive "skip to newline" here would cut a
+             * multi-line block comment in half and feed its second
+             * half to the tokenizer as if it were real code. Just
+             * stop; the outer loop picks up right after the filename
+             * and handles whatever comes next exactly like anywhere
+             * else in the file. */
+            do_include(fname, angled, base_dir, line);
+            free(fname);
+            continue;
+        }
+
         Token t; memset(&t, 0, sizeof(t)); t.line = line;
 
         /* Identifiers and keywords: a keyword is just an identifier
@@ -246,10 +401,25 @@ void lex(const char *src) {
         i++;
         tok_push(t);
     }
-    /* A trailing T_EOF sentinel means the parser can always safely
-     * "peek one token ahead" without a separate bounds check - the
-     * worst that happens is it peeks at T_EOF, which every parse_*
-     * function already knows how to reject with a sensible error. */
+    return line;
+}
+
+/* The public entry point. Reads `path`, lexes it (following any
+ * #include directives it contains, recursively - see do_include()
+ * above), and finally appends the T_EOF sentinel that lets the parser
+ * always safely "peek one token ahead" without a separate bounds
+ * check - the worst that happens is it peeks at T_EOF, which every
+ * parse_* function already knows how to reject with a sensible
+ * error. This is the only place EOF is appended: lex_string() itself
+ * never does, so included files' tokens splice in cleanly without an
+ * EOF marker landing in the middle of the stream. */
+void lex_file(const char *path) {
+    mark_included(path); /* harmless even if nothing ever tries to re-include the top-level file */
+    char *src = read_file(path);
+    char *dir = dirname_of(path);
+    int line = lex_string(src, dir);
+    free(src);
+    free(dir);
     Token e; memset(&e, 0, sizeof(e)); e.kind = T_EOF; e.line = line;
     tok_push(e);
 }

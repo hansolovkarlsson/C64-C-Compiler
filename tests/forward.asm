@@ -21,6 +21,10 @@ __CHROUT = $FFD2
                       ; (the default charset only has graphics past $C0)
     LDA #0
     STA __rt_spidx
+    LDA #<__rt_cstack ; call-stack pointer starts at the base of its buffer -
+    STA __rt_csp      ; see codegen_stmt.c's emit_function() for how each
+    LDA #>__rt_cstack ; function's push/popframe routines use it to support
+    STA __rt_csp+1    ; recursion despite locals/params living at fixed addresses
     JSR __fn_main
     RTS
  
@@ -28,7 +32,7 @@ __CHROUT = $FFD2
 ; needs (zp),Y indirection; these are always accessed directly) -------
 __rt_spidx:
     .byte 0
-__zpAP2:
+__rt_csp:
     .fill 2, 0
 __zpT1:
     .fill 2, 0
@@ -45,6 +49,15 @@ __rt_push:
     INX
     INX
     STX __rt_spidx
+    BNE __rt_push_ok
+    LDA #<__str_1
+    STA __zpR
+    LDA #>__str_1
+    STA __zpR+1
+    JSR __rt_puts
+__rt_push_halt:
+    JMP __rt_push_halt
+__rt_push_ok:
     RTS
  
 __rt_pop2:
@@ -56,6 +69,29 @@ __rt_pop2:
     LDA __rt_stack+1,X
     STA __zpR2+1
     STX __rt_spidx
+    RTS
+ 
+__rt_cstack_check:
+    TSX
+    CPX #$20
+    BCC __rt_csc_overflow
+    LDA __rt_csp+1
+    CMP #>(__rt_cstack+4096)
+    BCC __rt_csc_ok
+    BNE __rt_csc_overflow
+    LDA __rt_csp
+    CMP #<(__rt_cstack+4096)
+    BCC __rt_csc_ok
+    BEQ __rt_csc_ok
+__rt_csc_overflow:
+    LDA #<__str_0
+    STA __zpR
+    LDA #>__str_0
+    STA __zpR+1
+    JSR __rt_puts
+__rt_csc_halt:
+    JMP __rt_csc_halt
+__rt_csc_ok:
     RTS
  
 __rt_mul16:
@@ -450,9 +486,51 @@ __g_g_neg:
     .word -5
  
 ; ---- function caller_calls_later ---------------------------------------------
+__fn_caller_calls_later_frame:
 __fn_caller_calls_later_v_x:
     .fill 2, 0
+__fn_caller_calls_later_pushframe:
+    LDA __rt_csp
+    STA __zpAP
+    LDA __rt_csp+1
+    STA __zpAP+1
+    LDY #0
+__fn_caller_calls_later_pushfr_loop:
+    LDA __fn_caller_calls_later_frame,Y
+    STA (__zpAP),Y
+    INY
+    CPY #2
+    BNE __fn_caller_calls_later_pushfr_loop
+    CLC
+    LDA __rt_csp
+    ADC #2
+    STA __rt_csp
+    LDA __rt_csp+1
+    ADC #0
+    STA __rt_csp+1
+    JMP __rt_cstack_check
+ 
+__fn_caller_calls_later_popframe:
+    SEC
+    LDA __rt_csp
+    SBC #2
+    STA __rt_csp
+    STA __zpAP
+    LDA __rt_csp+1
+    SBC #0
+    STA __rt_csp+1
+    STA __zpAP+1
+    LDY #0
+__fn_caller_calls_later_popfr_loop:
+    LDA (__zpAP),Y
+    STA __fn_caller_calls_later_frame,Y
+    INY
+    CPY #2
+    BNE __fn_caller_calls_later_popfr_loop
+    RTS
+ 
 __fn_caller_calls_later:
+    JSR __fn_later_defined_pushframe
     LDA __fn_caller_calls_later_v_x
     STA __zpR
     LDA __fn_caller_calls_later_v_x+1
@@ -462,6 +540,7 @@ __fn_caller_calls_later:
     LDA __zpR+1
     STA __fn_later_defined_v_x+1
     JSR __fn_later_defined
+    JSR __fn_later_defined_popframe
     JSR __rt_push
     LDA #<1
     STA __zpR
@@ -479,8 +558,49 @@ __fn_caller_calls_later:
     RTS
  
 ; ---- function later_defined ---------------------------------------------
+__fn_later_defined_frame:
 __fn_later_defined_v_x:
     .fill 2, 0
+__fn_later_defined_pushframe:
+    LDA __rt_csp
+    STA __zpAP
+    LDA __rt_csp+1
+    STA __zpAP+1
+    LDY #0
+__fn_later_defined_pushfr_loop:
+    LDA __fn_later_defined_frame,Y
+    STA (__zpAP),Y
+    INY
+    CPY #2
+    BNE __fn_later_defined_pushfr_loop
+    CLC
+    LDA __rt_csp
+    ADC #2
+    STA __rt_csp
+    LDA __rt_csp+1
+    ADC #0
+    STA __rt_csp+1
+    JMP __rt_cstack_check
+ 
+__fn_later_defined_popframe:
+    SEC
+    LDA __rt_csp
+    SBC #2
+    STA __rt_csp
+    STA __zpAP
+    LDA __rt_csp+1
+    SBC #0
+    STA __rt_csp+1
+    STA __zpAP+1
+    LDY #0
+__fn_later_defined_popfr_loop:
+    LDA (__zpAP),Y
+    STA __fn_later_defined_frame,Y
+    INY
+    CPY #2
+    BNE __fn_later_defined_popfr_loop
+    RTS
+ 
 __fn_later_defined:
     LDA __fn_later_defined_v_x
     STA __zpR
@@ -497,8 +617,49 @@ __fn_later_defined:
     RTS
  
 ; ---- function earlier_defined ---------------------------------------------
+__fn_earlier_defined_frame:
 __fn_earlier_defined_v_x:
     .fill 2, 0
+__fn_earlier_defined_pushframe:
+    LDA __rt_csp
+    STA __zpAP
+    LDA __rt_csp+1
+    STA __zpAP+1
+    LDY #0
+__fn_earlier_defined_pushfr_loop:
+    LDA __fn_earlier_defined_frame,Y
+    STA (__zpAP),Y
+    INY
+    CPY #2
+    BNE __fn_earlier_defined_pushfr_loop
+    CLC
+    LDA __rt_csp
+    ADC #2
+    STA __rt_csp
+    LDA __rt_csp+1
+    ADC #0
+    STA __rt_csp+1
+    JMP __rt_cstack_check
+ 
+__fn_earlier_defined_popframe:
+    SEC
+    LDA __rt_csp
+    SBC #2
+    STA __rt_csp
+    STA __zpAP
+    LDA __rt_csp+1
+    SBC #0
+    STA __rt_csp+1
+    STA __zpAP+1
+    LDY #0
+__fn_earlier_defined_popfr_loop:
+    LDA (__zpAP),Y
+    STA __fn_earlier_defined_frame,Y
+    INY
+    CPY #2
+    BNE __fn_earlier_defined_popfr_loop
+    RTS
+ 
 __fn_earlier_defined:
     LDA __fn_earlier_defined_v_x
     STA __zpR
@@ -521,9 +682,51 @@ __fn_earlier_defined:
     RTS
  
 ; ---- function caller_calls_earlier ---------------------------------------------
+__fn_caller_calls_earlier_frame:
 __fn_caller_calls_earlier_v_x:
     .fill 2, 0
+__fn_caller_calls_earlier_pushframe:
+    LDA __rt_csp
+    STA __zpAP
+    LDA __rt_csp+1
+    STA __zpAP+1
+    LDY #0
+__fn_caller_calls_earlier_pushfr_loop:
+    LDA __fn_caller_calls_earlier_frame,Y
+    STA (__zpAP),Y
+    INY
+    CPY #2
+    BNE __fn_caller_calls_earlier_pushfr_loop
+    CLC
+    LDA __rt_csp
+    ADC #2
+    STA __rt_csp
+    LDA __rt_csp+1
+    ADC #0
+    STA __rt_csp+1
+    JMP __rt_cstack_check
+ 
+__fn_caller_calls_earlier_popframe:
+    SEC
+    LDA __rt_csp
+    SBC #2
+    STA __rt_csp
+    STA __zpAP
+    LDA __rt_csp+1
+    SBC #0
+    STA __rt_csp+1
+    STA __zpAP+1
+    LDY #0
+__fn_caller_calls_earlier_popfr_loop:
+    LDA (__zpAP),Y
+    STA __fn_caller_calls_earlier_frame,Y
+    INY
+    CPY #2
+    BNE __fn_caller_calls_earlier_popfr_loop
+    RTS
+ 
 __fn_caller_calls_earlier:
+    JSR __fn_earlier_defined_pushframe
     LDA __fn_caller_calls_earlier_v_x
     STA __zpR
     LDA __fn_caller_calls_earlier_v_x+1
@@ -533,16 +736,25 @@ __fn_caller_calls_earlier:
     LDA __zpR+1
     STA __fn_earlier_defined_v_x+1
     JSR __fn_earlier_defined
+    JSR __fn_earlier_defined_popframe
     RTS
     RTS
  
 ; ---- function main ---------------------------------------------
+__fn_main_frame:
+__fn_main_pushframe:
+    RTS
+ 
+__fn_main_popframe:
+    RTS
+ 
 __fn_main:
     LDA #<48
     STA __zpR
     LDA #>48
     STA __zpR+1
     JSR __rt_push
+    JSR __fn_caller_calls_later_pushframe
     LDA #<10
     STA __zpR
     LDA #>10
@@ -552,6 +764,7 @@ __fn_main:
     LDA __zpR+1
     STA __fn_caller_calls_later_v_x+1
     JSR __fn_caller_calls_later
+    JSR __fn_caller_calls_later_popframe
     JSR __rt_push
     LDA #<21
     STA __zpR
@@ -575,6 +788,7 @@ __fn_main:
     LDA #>48
     STA __zpR+1
     JSR __rt_push
+    JSR __fn_caller_calls_earlier_pushframe
     LDA #<5
     STA __zpR
     LDA #>5
@@ -584,6 +798,7 @@ __fn_main:
     LDA __zpR+1
     STA __fn_caller_calls_earlier_v_x+1
     JSR __fn_caller_calls_earlier
+    JSR __fn_caller_calls_earlier_popframe
     JSR __rt_push
     LDA #<105
     STA __zpR
@@ -673,6 +888,21 @@ __fn_main:
     JSR __CHROUT
     RTS
  
+; ---- string literals (raw bytes; __rt_puts converts at print time) ----
+__str_0:
+    .byte 13,67,67,54,52,32,82,85,78,84,73,77,69,32,69,82,82,79,82,58,32,67,65,76,76,32,83,84,65,67,75,32
+    .byte 79,86,69,82,70,76,79,87,13,40,82,69,67,85,82,83,73,79,78,32,84,79,79,32,68,69,69,80,44,32,79,82
+    .byte 32,77,73,83,83,73,78,71,32,66,65,83,69,32,67,65,83,69,41,13,0
+__str_1:
+    .byte 13,67,67,54,52,32,82,85,78,84,73,77,69,32,69,82,82,79,82,58,32,69,88,80,82,69,83,83,73,79,78,32
+    .byte 83,84,65,67,75,32,79,86,69,82,70,76,79,87,13,40,69,88,80,82,69,83,83,73,79,78,83,32,78,69,83,84
+    .byte 69,68,32,84,79,79,32,68,69,69,80,76,89,32,65,67,82,79,83,83,32,82,69,67,85,82,83,73,79,78,41,13
+    .byte 0
+ 
 ; ---- operand stack (128 16-bit slots, indexed by __rt_spidx) -------
 __rt_stack:
     .fill 256, 0
+; ---- call stack (4096 bytes; see codegen_stmt.c's emit_function() ---
+; ---- and codegen_runtime.c's cstack-check comment for what this is)--
+__rt_cstack:
+    .fill 4096, 0

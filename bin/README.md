@@ -1,4 +1,8 @@
 README.md
 
-# For this project to work, build c64asm from my other project first and put the assembler binary in this directory
+# IMPORTANT!
+
+For this project to work, c64asm binary has to be copied into this directory.
+
+The cc64 compiler outputs assembly code for the c64asm.
 

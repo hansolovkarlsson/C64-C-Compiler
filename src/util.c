@@ -51,3 +51,20 @@ char *xstrdup(const char *s) {
     memcpy(p, s, n);
     return p;
 }
+
+/* Reads an entire file into a fresh, NUL-terminated buffer. Shared by
+ * main.c (the top-level input file) and lexer.c (every file pulled in
+ * by #include) - both just want "the whole file as a string" and
+ * don't care how it got there. */
+char *read_file(const char *path) {
+    FILE *f = fopen(path, "rb");
+    if (!f) { fprintf(stderr, "cc64: cannot open '%s'\n", path); exit(1); }
+    fseek(f, 0, SEEK_END);
+    long sz = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    char *buf = xmalloc(sz + 1);
+    size_t rd = fread(buf, 1, sz, f);
+    buf[rd] = '\0';
+    fclose(f);
+    return buf;
+}

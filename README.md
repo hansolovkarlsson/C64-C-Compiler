@@ -4,9 +4,9 @@
 exact syntax your `c64asm.c` assembler expects. This is built
 incrementally: get a solid, verified minimal subset working first (a
 step-1 "int/char, no pointers" core), then add features on top of a
-foundation that's already known to generate correct code. Pointers
-and full function recursion are both in now; structs and a small
-standard library are the likely next steps.
+foundation that's already known to generate correct code. Pointers,
+full function recursion, `#include`, and a small standard library are
+all in now; `struct`s are the likely next step.
 
 The source is split into one file per compiler phase under `src/`,
 each with a substantial comment explaining what that phase does and
@@ -42,6 +42,25 @@ or, to do both in one step:
 Load `program.prg` in VICE (or a real C64) the normal way; it's built
 with a BASIC `10 SYS ...` loader stub, so `LOAD` then `RUN` works.
 
+### Using the standard library
+
+`#include <string.h>` and `#include <print.h>` (in `lib/`) are found
+automatically with no setup, as long as `cc64` is invoked with a path
+that has a `/` in it - `./cc64`, `../build/cc64`, `/opt/cc64/cc64`,
+all fine - which covers every example in this README and `build.sh`.
+(If `cc64` is on your `PATH` and invoked by bare name, there's no
+portable, dependency-free way to recover its install location from
+C99 alone, so that one case needs an explicit `-I`:)
+
+```sh
+./cc64 program.c -o program.asm -I /path/to/cc64/lib
+```
+
+`#include "local.h"` (quoted) looks next to the file doing the
+including first, then falls back to the same search path as `<...>`
+- see "The standard library" below for what's in `lib/`, and
+`src/cc64.h`'s "HOW #include WORKS" note for the mechanism itself.
+
 ## Source layout
 
 Each file below corresponds to one phase you'd recognize from a
@@ -55,7 +74,7 @@ to approach the codebase for the first time:
 | File | What it does |
 |---|---|
 | `src/cc64.h` | Shared types and cross-module declarations; start here for the architecture overview |
-| `src/lexer.c` | Source text -> tokens |
+| `src/lexer.c` | Source text -> tokens, and `#include` splicing |
 | `src/ast.c` | The AST node constructor |
 | `src/symtab.c` | Symbol tables, plus the minimal type inference used for pointer arithmetic |
 | `src/parser.c` | Recursive-descent parsing (tokens -> AST), and the two-pass driver (`pass_a`/`pass_b`) |
@@ -64,6 +83,7 @@ to approach the codebase for the first time:
 | `src/codegen_expr.c` | Expression codegen - the largest file, where most operators and pointer handling live |
 | `src/codegen_stmt.c` | Statement codegen, storage layout, and the per-function frame save/restore routines that make recursion work |
 | `src/main.c` | The command-line driver tying every phase together |
+| `lib/string.h`, `lib/print.h` | The standard library - see below |
 
 
 ## What's supported
@@ -123,18 +143,29 @@ to approach the codebase for the first time:
   returning a plain value from a function declared to return a
   pointer (or vice versa). `0` is always accepted as a valid pointer
   value ("null") in these checks.
+- **`#include`**, both `"quoted"` (searched next to the including
+  file, then falling back to the same path as angle brackets) and
+  `<angle-bracket>` (searched via `-I` directories and an
+  automatically-detected `lib/` next to the compiler itself - see
+  "Using the standard library" above). Every file is implicitly
+  include-once by resolved path, so headers don't need manual include
+  guards. This is the *only* preprocessor functionality - no `#define`,
+  no `#ifdef`, nothing else starting with `#` - see `src/cc64.h`'s
+  "HOW #include WORKS" note for the (simple) mechanism.
+- **A small standard library** (`lib/string.h`, `lib/print.h`) - see
+  "The standard library" below for the full list.
 
 ## Not supported yet (planned for later steps)
 
 Pointer-to-pointer, function pointers, arrays of pointers, array
 *parameters* written with `[]` syntax (use `type *name` instead - it
 receives exactly the same decayed pointer), `struct`/`union`,
-`typedef`s, multi-dimensional arrays, floating
-point, the preprocessor, `do`/`while`, `switch`, multiple source
-files, and anything like `printf` (there's no variadic support or
-number-to-string formatting - see `print_uint`/`print_int` in
-`tests/features.c` for a hand-written decimal printer you can copy
-into your own programs in the meantime).
+`typedef`s, multi-dimensional arrays, floating point, `do`/`while`,
+`switch`, and anything like `printf` (there's no variadic-function
+support, so no way to accept a runtime-variable number of arguments -
+`print_int`/`print_hex` in `lib/print.h` cover the common cases with
+fixed-arity calls instead). The preprocessor is limited to
+`#include` - no `#define`, no macros, no conditional compilation.
 
 ## Design notes
 
@@ -280,6 +311,33 @@ always stored in the full 2-byte slot regardless of what it points to
 (a `char*` variable itself takes 2 bytes, even though each byte *it
 points to* is 1 byte).
 
+### The standard library
+
+`lib/string.h`: `strlen`, `strcpy`, `strcat`, `strcmp`, `strchr`,
+`memset`, `memcpy` - matching the real C library's names and
+contracts (including "no bounds checking, ever" - the caller is
+responsible for destinations being big enough, exactly like the real
+thing) everywhere cc64's type system allows it.
+
+`lib/print.h`: `print_int` (signed decimal), `print_hex` (4 hex
+digits, the exact bit pattern regardless of sign), and `newline`.
+Deliberately missing: `print_uint`. cc64's `int` is always signed -
+there's no unsigned type and no cast operator - so there's no correct
+way to decimal-print a 16-bit value in the 32768-65535 range using
+cc64's own (always-signed) `/`, `%`, or `<`/`>`; shipping a
+`print_uint` built from ordinary cc64 code would silently misprint
+exactly that range. `print_hex` doesn't have this problem (see its
+comment in `lib/print.h` for why bitwise `&`/`>>` are safe here when
+`/` and `%` aren't) and covers most of the same real need - inspecting
+a raw 16-bit value - so it's the one shipped instead.
+
+Both headers are **header-only**: `#include` splices their text
+directly into your program (see "HOW #include WORKS" in `src/cc64.h`),
+so every function you include gets fully compiled into your program
+whether you call it or not - there's no linker to strip the unused
+ones out. Immaterial for a handful of small functions; worth knowing
+if this library ever grows into something bigger.
+
 ## Testing
 
 There's no VICE/x64 or other 6502 emulator in this environment, so
@@ -318,15 +376,23 @@ across an entire recursive subtree), mutual recursion, recursion with
 per-level local arrays that must survive inner calls, recursive
 pointer walking, 80-deep recursion, and a regression check for a
 nested array-target assignment bug found while building the frame
-machinery. `tests/forward.c` checks that forward/backward call
-references both work regardless of declaration order. `tests/hello.c`
-is the basic smoke test for the whole pipeline (BASIC stub, zero-page
-init, stack init, `puts`/`putchar`, PETSCII case mapping).
+machinery. `tests/include.c` (with the small local header
+`tests/testinc.h`) covers both quoted and angle-bracket `#include`,
+include-once behavior (the same header is pulled in three times
+across the two files - directly, repeated, and via a nested include -
+and must not cause a redefinition error), and exercises every
+function in `lib/string.h` and `lib/print.h`, including the
+sign-extension edge cases in `print_hex` (checked at `-1` and `-4096`,
+not just positive values). `tests/forward.c` checks that
+forward/backward call references both work regardless of declaration
+order. `tests/hello.c` is the basic smoke test for the whole pipeline
+(BASIC stub, zero-page init, stack init, `puts`/`putchar`, PETSCII
+case mapping).
 
-Run all five:
+Run all six:
 
 ```sh
-for f in hello features forward pointers recursion; do
+for f in hello features forward pointers recursion include; do
     ./cc64 tests/$f.c -o tests/$f.asm
     ./c64asm tests/$f.asm -o tests/$f.prg --listing tests/$f.lst
     python3 mini6502.py tests/$f.prg tests/$f.lst
@@ -342,9 +408,12 @@ done
    around every call (see "How recursion works" above) rather than a
    full stack-frame rewrite, so the fixed-address storage model and
    all its codegen simplicity survived intact.
-3. `do`/`while`, `switch`.
+3. ~~`#include` and a small standard library~~ - done. Handled
+   entirely in the lexer (see "HOW #include WORKS" in `src/cc64.h`),
+   which meant zero changes to parsing or codegen; `lib/string.h` and
+   `lib/print.h` are ordinary cc64 programs that happen to be headers.
 4. `struct`s (a natural pairing with pointers).
-5. A tiny standard library: real `printf`-lite, string helpers
-   (`strlen`, `strcpy`, etc., now easy to write in terms of `char*`
-   and recursion).
-6. Multiple source files / a simple `#include`.
+5. `do`/`while`, `switch`.
+6. Real `printf`-lite - blocked on variadic function support, which
+   is a real calling-convention feature (not just a library
+   function), unlike the rest of the standard library above.

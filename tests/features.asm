@@ -21,6 +21,10 @@ __CHROUT = $FFD2
                       ; (the default charset only has graphics past $C0)
     LDA #0
     STA __rt_spidx
+    LDA #<__rt_cstack ; call-stack pointer starts at the base of its buffer -
+    STA __rt_csp      ; see codegen_stmt.c's emit_function() for how each
+    LDA #>__rt_cstack ; function's push/popframe routines use it to support
+    STA __rt_csp+1    ; recursion despite locals/params living at fixed addresses
     JSR __fn_main
     RTS
  
@@ -28,7 +32,7 @@ __CHROUT = $FFD2
 ; needs (zp),Y indirection; these are always accessed directly) -------
 __rt_spidx:
     .byte 0
-__zpAP2:
+__rt_csp:
     .fill 2, 0
 __zpT1:
     .fill 2, 0
@@ -45,6 +49,15 @@ __rt_push:
     INX
     INX
     STX __rt_spidx
+    BNE __rt_push_ok
+    LDA #<__str_1
+    STA __zpR
+    LDA #>__str_1
+    STA __zpR+1
+    JSR __rt_puts
+__rt_push_halt:
+    JMP __rt_push_halt
+__rt_push_ok:
     RTS
  
 __rt_pop2:
@@ -56,6 +69,29 @@ __rt_pop2:
     LDA __rt_stack+1,X
     STA __zpR2+1
     STX __rt_spidx
+    RTS
+ 
+__rt_cstack_check:
+    TSX
+    CPX #$20
+    BCC __rt_csc_overflow
+    LDA __rt_csp+1
+    CMP #>(__rt_cstack+4096)
+    BCC __rt_csc_ok
+    BNE __rt_csc_overflow
+    LDA __rt_csp
+    CMP #<(__rt_cstack+4096)
+    BCC __rt_csc_ok
+    BEQ __rt_csc_ok
+__rt_csc_overflow:
+    LDA #<__str_0
+    STA __zpR
+    LDA #>__str_0
+    STA __zpR+1
+    JSR __rt_puts
+__rt_csc_halt:
+    JMP __rt_csc_halt
+__rt_csc_ok:
     RTS
  
 __rt_mul16:
@@ -452,12 +488,53 @@ __g_cbuf:
     .fill 8, 0
  
 ; ---- function print_uint ---------------------------------------------
+__fn_print_uint_frame:
 __fn_print_uint_v_n:
     .fill 2, 0
 __fn_print_uint_v_buf:
     .fill 6, 0
 __fn_print_uint_v_i:
     .fill 2, 0
+__fn_print_uint_pushframe:
+    LDA __rt_csp
+    STA __zpAP
+    LDA __rt_csp+1
+    STA __zpAP+1
+    LDY #0
+__fn_print_uint_pushfr_loop:
+    LDA __fn_print_uint_frame,Y
+    STA (__zpAP),Y
+    INY
+    CPY #10
+    BNE __fn_print_uint_pushfr_loop
+    CLC
+    LDA __rt_csp
+    ADC #10
+    STA __rt_csp
+    LDA __rt_csp+1
+    ADC #0
+    STA __rt_csp+1
+    JMP __rt_cstack_check
+ 
+__fn_print_uint_popframe:
+    SEC
+    LDA __rt_csp
+    SBC #10
+    STA __rt_csp
+    STA __zpAP
+    LDA __rt_csp+1
+    SBC #0
+    STA __rt_csp+1
+    STA __zpAP+1
+    LDY #0
+__fn_print_uint_popfr_loop:
+    LDA (__zpAP),Y
+    STA __fn_print_uint_frame,Y
+    INY
+    CPY #10
+    BNE __fn_print_uint_popfr_loop
+    RTS
+ 
 __fn_print_uint:
     LDA __fn_print_uint_v_n
     STA __zpR
@@ -523,9 +600,10 @@ __L5:
     ADC #>__fn_print_uint_v_buf
     STA __zpAP+1
     LDA __zpAP
-    STA __zpAP2
+    STA __zpR
     LDA __zpAP+1
-    STA __zpAP2+1
+    STA __zpR+1
+    JSR __rt_push
     LDA __fn_print_uint_v_n
     STA __zpR
     LDA __fn_print_uint_v_n+1
@@ -541,9 +619,10 @@ __L5:
     STA __zpR
     LDA __zpT0+1
     STA __zpR+1
-    LDA __zpAP2
+    JSR __rt_pop2
+    LDA __zpR2
     STA __zpAP
-    LDA __zpAP2+1
+    LDA __zpR2+1
     STA __zpAP+1
     LDY #0
     LDA __zpR
@@ -667,8 +746,49 @@ __L7:
     RTS
  
 ; ---- function print_int ---------------------------------------------
+__fn_print_int_frame:
 __fn_print_int_v_n:
     .fill 2, 0
+__fn_print_int_pushframe:
+    LDA __rt_csp
+    STA __zpAP
+    LDA __rt_csp+1
+    STA __zpAP+1
+    LDY #0
+__fn_print_int_pushfr_loop:
+    LDA __fn_print_int_frame,Y
+    STA (__zpAP),Y
+    INY
+    CPY #2
+    BNE __fn_print_int_pushfr_loop
+    CLC
+    LDA __rt_csp
+    ADC #2
+    STA __rt_csp
+    LDA __rt_csp+1
+    ADC #0
+    STA __rt_csp+1
+    JMP __rt_cstack_check
+ 
+__fn_print_int_popframe:
+    SEC
+    LDA __rt_csp
+    SBC #2
+    STA __rt_csp
+    STA __zpAP
+    LDA __rt_csp+1
+    SBC #0
+    STA __rt_csp+1
+    STA __zpAP+1
+    LDY #0
+__fn_print_int_popfr_loop:
+    LDA (__zpAP),Y
+    STA __fn_print_int_frame,Y
+    INY
+    CPY #2
+    BNE __fn_print_int_popfr_loop
+    RTS
+ 
 __fn_print_int:
     LDA __fn_print_int_v_n
     STA __zpR
@@ -693,6 +813,7 @@ __L11:
     JSR __rt_topetscii
     LDA __zpR
     JSR __CHROUT
+    JSR __fn_print_uint_pushframe
     LDA __fn_print_int_v_n
     STA __zpR
     LDA __fn_print_int_v_n+1
@@ -710,8 +831,10 @@ __L11:
     LDA __zpR+1
     STA __fn_print_uint_v_n+1
     JSR __fn_print_uint
+    JSR __fn_print_uint_popframe
     JMP __L10
 __L9:
+    JSR __fn_print_uint_pushframe
     LDA __fn_print_int_v_n
     STA __zpR
     LDA __fn_print_int_v_n+1
@@ -721,10 +844,18 @@ __L9:
     LDA __zpR+1
     STA __fn_print_uint_v_n+1
     JSR __fn_print_uint
+    JSR __fn_print_uint_popframe
 __L10:
     RTS
  
 ; ---- function nl ---------------------------------------------
+__fn_nl_frame:
+__fn_nl_pushframe:
+    RTS
+ 
+__fn_nl_popframe:
+    RTS
+ 
 __fn_nl:
     LDA #<13
     STA __zpR
@@ -736,10 +867,51 @@ __fn_nl:
     RTS
  
 ; ---- function add ---------------------------------------------
+__fn_add_frame:
 __fn_add_v_a:
     .fill 2, 0
 __fn_add_v_b:
     .fill 2, 0
+__fn_add_pushframe:
+    LDA __rt_csp
+    STA __zpAP
+    LDA __rt_csp+1
+    STA __zpAP+1
+    LDY #0
+__fn_add_pushfr_loop:
+    LDA __fn_add_frame,Y
+    STA (__zpAP),Y
+    INY
+    CPY #4
+    BNE __fn_add_pushfr_loop
+    CLC
+    LDA __rt_csp
+    ADC #4
+    STA __rt_csp
+    LDA __rt_csp+1
+    ADC #0
+    STA __rt_csp+1
+    JMP __rt_cstack_check
+ 
+__fn_add_popframe:
+    SEC
+    LDA __rt_csp
+    SBC #4
+    STA __rt_csp
+    STA __zpAP
+    LDA __rt_csp+1
+    SBC #0
+    STA __rt_csp+1
+    STA __zpAP+1
+    LDY #0
+__fn_add_popfr_loop:
+    LDA (__zpAP),Y
+    STA __fn_add_frame,Y
+    INY
+    CPY #4
+    BNE __fn_add_popfr_loop
+    RTS
+ 
 __fn_add:
     LDA __fn_add_v_a
     STA __zpR
@@ -762,12 +934,53 @@ __fn_add:
     RTS
  
 ; ---- function fact ---------------------------------------------
+__fn_fact_frame:
 __fn_fact_v_n:
     .fill 2, 0
 __fn_fact_v_result:
     .fill 2, 0
 __fn_fact_v_i:
     .fill 2, 0
+__fn_fact_pushframe:
+    LDA __rt_csp
+    STA __zpAP
+    LDA __rt_csp+1
+    STA __zpAP+1
+    LDY #0
+__fn_fact_pushfr_loop:
+    LDA __fn_fact_frame,Y
+    STA (__zpAP),Y
+    INY
+    CPY #6
+    BNE __fn_fact_pushfr_loop
+    CLC
+    LDA __rt_csp
+    ADC #6
+    STA __rt_csp
+    LDA __rt_csp+1
+    ADC #0
+    STA __rt_csp+1
+    JMP __rt_cstack_check
+ 
+__fn_fact_popframe:
+    SEC
+    LDA __rt_csp
+    SBC #6
+    STA __rt_csp
+    STA __zpAP
+    LDA __rt_csp+1
+    SBC #0
+    STA __rt_csp+1
+    STA __zpAP+1
+    LDY #0
+__fn_fact_popfr_loop:
+    LDA (__zpAP),Y
+    STA __fn_fact_frame,Y
+    INY
+    CPY #6
+    BNE __fn_fact_popfr_loop
+    RTS
+ 
 __fn_fact:
     LDA #<1
     STA __zpR
@@ -849,6 +1062,13 @@ __L13:
     RTS
  
 ; ---- function side_effect ---------------------------------------------
+__fn_side_effect_frame:
+__fn_side_effect_pushframe:
+    RTS
+ 
+__fn_side_effect_popframe:
+    RTS
+ 
 __fn_side_effect:
     LDA __g_g_counter
     STA __zpR
@@ -879,11 +1099,53 @@ __fn_side_effect:
     RTS
  
 ; ---- function main ---------------------------------------------
+__fn_main_frame:
 __fn_main_v_i:
     .fill 2, 0
 __fn_main_v_x:
     .fill 2, 0
+__fn_main_pushframe:
+    LDA __rt_csp
+    STA __zpAP
+    LDA __rt_csp+1
+    STA __zpAP+1
+    LDY #0
+__fn_main_pushfr_loop:
+    LDA __fn_main_frame,Y
+    STA (__zpAP),Y
+    INY
+    CPY #4
+    BNE __fn_main_pushfr_loop
+    CLC
+    LDA __rt_csp
+    ADC #4
+    STA __rt_csp
+    LDA __rt_csp+1
+    ADC #0
+    STA __rt_csp+1
+    JMP __rt_cstack_check
+ 
+__fn_main_popframe:
+    SEC
+    LDA __rt_csp
+    SBC #4
+    STA __rt_csp
+    STA __zpAP
+    LDA __rt_csp+1
+    SBC #0
+    STA __rt_csp+1
+    STA __zpAP+1
+    LDY #0
+__fn_main_popfr_loop:
+    LDA (__zpAP),Y
+    STA __fn_main_frame,Y
+    INY
+    CPY #4
+    BNE __fn_main_popfr_loop
+    RTS
+ 
 __fn_main:
+    JSR __fn_print_int_pushframe
     LDA #<17
     STA __zpR
     LDA #>17
@@ -906,7 +1168,11 @@ __fn_main:
     LDA __zpR+1
     STA __fn_print_int_v_n+1
     JSR __fn_print_int
+    JSR __fn_print_int_popframe
+    JSR __fn_nl_pushframe
     JSR __fn_nl
+    JSR __fn_nl_popframe
+    JSR __fn_print_int_pushframe
     LDA #<100
     STA __zpR
     LDA #>100
@@ -931,7 +1197,11 @@ __fn_main:
     LDA __zpR+1
     STA __fn_print_int_v_n+1
     JSR __fn_print_int
+    JSR __fn_print_int_popframe
+    JSR __fn_nl_pushframe
     JSR __fn_nl
+    JSR __fn_nl_popframe
+    JSR __fn_print_int_pushframe
     LDA #<6
     STA __zpR
     LDA #>6
@@ -948,7 +1218,11 @@ __fn_main:
     LDA __zpR+1
     STA __fn_print_int_v_n+1
     JSR __fn_print_int
+    JSR __fn_print_int_popframe
+    JSR __fn_nl_pushframe
     JSR __fn_nl
+    JSR __fn_nl_popframe
+    JSR __fn_print_int_pushframe
     LDA #<50
     STA __zpR
     LDA #>50
@@ -969,7 +1243,11 @@ __fn_main:
     LDA __zpR+1
     STA __fn_print_int_v_n+1
     JSR __fn_print_int
+    JSR __fn_print_int_popframe
+    JSR __fn_nl_pushframe
     JSR __fn_nl
+    JSR __fn_nl_popframe
+    JSR __fn_print_int_pushframe
     LDA #<50
     STA __zpR
     LDA #>50
@@ -990,7 +1268,11 @@ __fn_main:
     LDA __zpR+1
     STA __fn_print_int_v_n+1
     JSR __fn_print_int
+    JSR __fn_print_int_popframe
+    JSR __fn_nl_pushframe
     JSR __fn_nl
+    JSR __fn_nl_popframe
+    JSR __fn_print_int_pushframe
     LDA #<7
     STA __zpR
     LDA #>7
@@ -1019,7 +1301,11 @@ __fn_main:
     LDA __zpR+1
     STA __fn_print_int_v_n+1
     JSR __fn_print_int
+    JSR __fn_print_int_popframe
+    JSR __fn_nl_pushframe
     JSR __fn_nl
+    JSR __fn_nl_popframe
+    JSR __fn_print_int_pushframe
     LDA #<7
     STA __zpR
     LDA #>7
@@ -1048,7 +1334,11 @@ __fn_main:
     LDA __zpR+1
     STA __fn_print_int_v_n+1
     JSR __fn_print_int
+    JSR __fn_print_int_popframe
+    JSR __fn_nl_pushframe
     JSR __fn_nl
+    JSR __fn_nl_popframe
+    JSR __fn_print_int_pushframe
     LDA #<7
     STA __zpR
     LDA #>7
@@ -1077,7 +1367,11 @@ __fn_main:
     LDA __zpR+1
     STA __fn_print_int_v_n+1
     JSR __fn_print_int
+    JSR __fn_print_int_popframe
+    JSR __fn_nl_pushframe
     JSR __fn_nl
+    JSR __fn_nl_popframe
+    JSR __fn_print_int_pushframe
     LDA #<7
     STA __zpR
     LDA #>7
@@ -1106,7 +1400,11 @@ __fn_main:
     LDA __zpR+1
     STA __fn_print_int_v_n+1
     JSR __fn_print_int
+    JSR __fn_print_int_popframe
+    JSR __fn_nl_pushframe
     JSR __fn_nl
+    JSR __fn_nl_popframe
+    JSR __fn_print_int_pushframe
     LDA #<12
     STA __zpR
     LDA #>12
@@ -1128,7 +1426,11 @@ __fn_main:
     LDA __zpR+1
     STA __fn_print_int_v_n+1
     JSR __fn_print_int
+    JSR __fn_print_int_popframe
+    JSR __fn_nl_pushframe
     JSR __fn_nl
+    JSR __fn_nl_popframe
+    JSR __fn_print_int_pushframe
     LDA #<12
     STA __zpR
     LDA #>12
@@ -1150,7 +1452,11 @@ __fn_main:
     LDA __zpR+1
     STA __fn_print_int_v_n+1
     JSR __fn_print_int
+    JSR __fn_print_int_popframe
+    JSR __fn_nl_pushframe
     JSR __fn_nl
+    JSR __fn_nl_popframe
+    JSR __fn_print_int_pushframe
     LDA #<12
     STA __zpR
     LDA #>12
@@ -1172,7 +1478,11 @@ __fn_main:
     LDA __zpR+1
     STA __fn_print_int_v_n+1
     JSR __fn_print_int
+    JSR __fn_print_int_popframe
+    JSR __fn_nl_pushframe
     JSR __fn_nl
+    JSR __fn_nl_popframe
+    JSR __fn_print_int_pushframe
     LDA #<1
     STA __zpR
     LDA #>1
@@ -1189,7 +1499,11 @@ __fn_main:
     LDA __zpR+1
     STA __fn_print_int_v_n+1
     JSR __fn_print_int
+    JSR __fn_print_int_popframe
+    JSR __fn_nl_pushframe
     JSR __fn_nl
+    JSR __fn_nl_popframe
+    JSR __fn_print_int_pushframe
     LDA #<1024
     STA __zpR
     LDA #>1024
@@ -1206,7 +1520,11 @@ __fn_main:
     LDA __zpR+1
     STA __fn_print_int_v_n+1
     JSR __fn_print_int
+    JSR __fn_print_int_popframe
+    JSR __fn_nl_pushframe
     JSR __fn_nl
+    JSR __fn_nl_popframe
+    JSR __fn_print_int_pushframe
     LDA #<0
     STA __zpR
     LDA #>0
@@ -1222,7 +1540,11 @@ __fn_main:
     LDA __zpR+1
     STA __fn_print_int_v_n+1
     JSR __fn_print_int
+    JSR __fn_print_int_popframe
+    JSR __fn_nl_pushframe
     JSR __fn_nl
+    JSR __fn_nl_popframe
+    JSR __fn_print_int_pushframe
     LDA #<3
     STA __zpR
     LDA #>3
@@ -1239,7 +1561,11 @@ __fn_main:
     LDA __zpR+1
     STA __fn_print_int_v_n+1
     JSR __fn_print_int
+    JSR __fn_print_int_popframe
+    JSR __fn_nl_pushframe
     JSR __fn_nl
+    JSR __fn_nl_popframe
+    JSR __fn_print_int_pushframe
     LDA #<5
     STA __zpR
     LDA #>5
@@ -1256,7 +1582,11 @@ __fn_main:
     LDA __zpR+1
     STA __fn_print_int_v_n+1
     JSR __fn_print_int
+    JSR __fn_print_int_popframe
+    JSR __fn_nl_pushframe
     JSR __fn_nl
+    JSR __fn_nl_popframe
+    JSR __fn_print_int_pushframe
     LDA #<1
     STA __zpR
     LDA #>1
@@ -1281,7 +1611,11 @@ __fn_main:
     LDA __zpR+1
     STA __fn_print_int_v_n+1
     JSR __fn_print_int
+    JSR __fn_print_int_popframe
+    JSR __fn_nl_pushframe
     JSR __fn_nl
+    JSR __fn_nl_popframe
+    JSR __fn_print_int_pushframe
     LDA #<1
     STA __zpR
     LDA #>1
@@ -1306,7 +1640,11 @@ __fn_main:
     LDA __zpR+1
     STA __fn_print_int_v_n+1
     JSR __fn_print_int
+    JSR __fn_print_int_popframe
+    JSR __fn_nl_pushframe
     JSR __fn_nl
+    JSR __fn_nl_popframe
+    JSR __fn_print_int_pushframe
     LDA #<5
     STA __zpR
     LDA #>5
@@ -1323,7 +1661,11 @@ __fn_main:
     LDA __zpR+1
     STA __fn_print_int_v_n+1
     JSR __fn_print_int
+    JSR __fn_print_int_popframe
+    JSR __fn_nl_pushframe
     JSR __fn_nl
+    JSR __fn_nl_popframe
+    JSR __fn_print_int_pushframe
     LDA #<5
     STA __zpR
     LDA #>5
@@ -1340,7 +1682,11 @@ __fn_main:
     LDA __zpR+1
     STA __fn_print_int_v_n+1
     JSR __fn_print_int
+    JSR __fn_print_int_popframe
+    JSR __fn_nl_pushframe
     JSR __fn_nl
+    JSR __fn_nl_popframe
+    JSR __fn_print_int_pushframe
     LDA #<5
     STA __zpR
     LDA #>5
@@ -1357,7 +1703,11 @@ __fn_main:
     LDA __zpR+1
     STA __fn_print_int_v_n+1
     JSR __fn_print_int
+    JSR __fn_print_int_popframe
+    JSR __fn_nl_pushframe
     JSR __fn_nl
+    JSR __fn_nl_popframe
+    JSR __fn_print_int_pushframe
     LDA #<5
     STA __zpR
     LDA #>5
@@ -1374,7 +1724,10 @@ __fn_main:
     LDA __zpR+1
     STA __fn_print_int_v_n+1
     JSR __fn_print_int
+    JSR __fn_print_int_popframe
+    JSR __fn_nl_pushframe
     JSR __fn_nl
+    JSR __fn_nl_popframe
     LDA #<0
     STA __zpR
     LDA #>0
@@ -1392,7 +1745,9 @@ __fn_main:
     BNE __L18
     JMP __L16
 __L18:
+    JSR __fn_side_effect_pushframe
     JSR __fn_side_effect
+    JSR __fn_side_effect_popframe
     LDA __zpR
     ORA __zpR+1
     BNE __L19
@@ -1412,6 +1767,7 @@ __L17:
     STA __fn_main_v_x
     LDA __zpR+1
     STA __fn_main_v_x+1
+    JSR __fn_print_int_pushframe
     LDA __g_g_counter
     STA __zpR
     LDA __g_g_counter+1
@@ -1421,7 +1777,10 @@ __L17:
     LDA __zpR+1
     STA __fn_print_int_v_n+1
     JSR __fn_print_int
+    JSR __fn_print_int_popframe
+    JSR __fn_nl_pushframe
     JSR __fn_nl
+    JSR __fn_nl_popframe
     LDA #<1
     STA __zpR
     LDA #>1
@@ -1431,7 +1790,9 @@ __L17:
     BEQ __L22
     JMP __L20
 __L22:
+    JSR __fn_side_effect_pushframe
     JSR __fn_side_effect
+    JSR __fn_side_effect_popframe
     LDA __zpR
     ORA __zpR+1
     BEQ __L23
@@ -1451,6 +1812,7 @@ __L21:
     STA __fn_main_v_x
     LDA __zpR+1
     STA __fn_main_v_x+1
+    JSR __fn_print_int_pushframe
     LDA __g_g_counter
     STA __zpR
     LDA __g_g_counter+1
@@ -1460,7 +1822,10 @@ __L21:
     LDA __zpR+1
     STA __fn_print_int_v_n+1
     JSR __fn_print_int
+    JSR __fn_print_int_popframe
+    JSR __fn_nl_pushframe
     JSR __fn_nl
+    JSR __fn_nl_popframe
     LDA #<1
     STA __zpR
     LDA #>1
@@ -1470,7 +1835,9 @@ __L21:
     BNE __L26
     JMP __L24
 __L26:
+    JSR __fn_side_effect_pushframe
     JSR __fn_side_effect
+    JSR __fn_side_effect_popframe
     LDA __zpR
     ORA __zpR+1
     BNE __L27
@@ -1490,6 +1857,7 @@ __L25:
     STA __fn_main_v_x
     LDA __zpR+1
     STA __fn_main_v_x+1
+    JSR __fn_print_int_pushframe
     LDA __g_g_counter
     STA __zpR
     LDA __g_g_counter+1
@@ -1499,7 +1867,12 @@ __L25:
     LDA __zpR+1
     STA __fn_print_int_v_n+1
     JSR __fn_print_int
+    JSR __fn_print_int_popframe
+    JSR __fn_nl_pushframe
     JSR __fn_nl
+    JSR __fn_nl_popframe
+    JSR __fn_print_int_pushframe
+    JSR __fn_add_pushframe
     LDA #<19
     STA __zpR
     LDA #>19
@@ -1517,12 +1890,18 @@ __L25:
     LDA __zpR+1
     STA __fn_add_v_b+1
     JSR __fn_add
+    JSR __fn_add_popframe
     LDA __zpR
     STA __fn_print_int_v_n
     LDA __zpR+1
     STA __fn_print_int_v_n+1
     JSR __fn_print_int
+    JSR __fn_print_int_popframe
+    JSR __fn_nl_pushframe
     JSR __fn_nl
+    JSR __fn_nl_popframe
+    JSR __fn_print_int_pushframe
+    JSR __fn_fact_pushframe
     LDA #<5
     STA __zpR
     LDA #>5
@@ -1532,12 +1911,16 @@ __L25:
     LDA __zpR+1
     STA __fn_fact_v_n+1
     JSR __fn_fact
+    JSR __fn_fact_popframe
     LDA __zpR
     STA __fn_print_int_v_n
     LDA __zpR+1
     STA __fn_print_int_v_n+1
     JSR __fn_print_int
+    JSR __fn_print_int_popframe
+    JSR __fn_nl_pushframe
     JSR __fn_nl
+    JSR __fn_nl_popframe
     LDA #<0
     STA __zpR
     LDA #>0
@@ -1577,9 +1960,10 @@ __L31:
     ADC #>__g_arr
     STA __zpAP+1
     LDA __zpAP
-    STA __zpAP2
+    STA __zpR
     LDA __zpAP+1
-    STA __zpAP2+1
+    STA __zpR+1
+    JSR __rt_push
     LDA __fn_main_v_i
     STA __zpR
     LDA __fn_main_v_i+1
@@ -1591,9 +1975,10 @@ __L31:
     STA __zpR+1
     JSR __rt_pop2
     JSR __rt_mul16
-    LDA __zpAP2
+    JSR __rt_pop2
+    LDA __zpR2
     STA __zpAP
-    LDA __zpAP2+1
+    LDA __zpR2+1
     STA __zpAP+1
     LDY #0
     LDA __zpR
@@ -1650,6 +2035,7 @@ __L32:
     BNE __L35
     JMP __L33
 __L35:
+    JSR __fn_print_int_pushframe
     LDA __fn_main_v_i
     STA __zpR
     LDA __fn_main_v_i+1
@@ -1674,6 +2060,7 @@ __L35:
     LDA __zpR+1
     STA __fn_print_int_v_n+1
     JSR __fn_print_int
+    JSR __fn_print_int_popframe
     LDA #<32
     STA __zpR
     LDA #>32
@@ -1705,7 +2092,9 @@ __L34:
     STA __fn_main_v_i+1
     JMP __L32
 __L33:
+    JSR __fn_nl_pushframe
     JSR __fn_nl
+    JSR __fn_nl_popframe
     LDA #<2
     STA __zpR
     LDA #>2
@@ -1720,9 +2109,10 @@ __L33:
     ADC #>__g_arr
     STA __zpAP+1
     LDA __zpAP
-    STA __zpAP2
+    STA __zpR
     LDA __zpAP+1
-    STA __zpAP2+1
+    STA __zpR+1
+    JSR __rt_push
     LDY #0
     LDA (__zpAP),Y
     STA __zpR
@@ -1742,9 +2132,10 @@ __L33:
     LDA __zpR2+1
     ADC __zpR+1
     STA __zpR+1
-    LDA __zpAP2
+    JSR __rt_pop2
+    LDA __zpR2
     STA __zpAP
-    LDA __zpAP2+1
+    LDA __zpR2+1
     STA __zpAP+1
     LDY #0
     LDA __zpR
@@ -1752,6 +2143,7 @@ __L33:
     INY
     LDA __zpR+1
     STA (__zpAP),Y
+    JSR __fn_print_int_pushframe
     LDA #<2
     STA __zpR
     LDA #>2
@@ -1776,7 +2168,10 @@ __L33:
     LDA __zpR+1
     STA __fn_print_int_v_n+1
     JSR __fn_print_int
+    JSR __fn_print_int_popframe
+    JSR __fn_nl_pushframe
     JSR __fn_nl
+    JSR __fn_nl_popframe
     LDA #<3
     STA __zpR
     LDA #>3
@@ -1817,6 +2212,7 @@ __L33:
     STA __zpR
     LDA __zpR2+1
     STA __zpR+1
+    JSR __fn_print_int_pushframe
     LDA #<3
     STA __zpR
     LDA #>3
@@ -1841,7 +2237,10 @@ __L33:
     LDA __zpR+1
     STA __fn_print_int_v_n+1
     JSR __fn_print_int
+    JSR __fn_print_int_popframe
+    JSR __fn_nl_pushframe
     JSR __fn_nl
+    JSR __fn_nl_popframe
     LDA #<4
     STA __zpR
     LDA #>4
@@ -1874,6 +2273,7 @@ __L33:
     INY
     LDA __zpR+1
     STA (__zpAP),Y
+    JSR __fn_print_int_pushframe
     LDA #<4
     STA __zpR
     LDA #>4
@@ -1898,7 +2298,10 @@ __L33:
     LDA __zpR+1
     STA __fn_print_int_v_n+1
     JSR __fn_print_int
+    JSR __fn_print_int_popframe
+    JSR __fn_nl_pushframe
     JSR __fn_nl
+    JSR __fn_nl_popframe
     LDA #<5
     STA __zpR
     LDA #>5
@@ -1939,6 +2342,7 @@ __L33:
     STA __zpR
     LDA __zpR2+1
     STA __zpR+1
+    JSR __fn_print_int_pushframe
     LDA #<5
     STA __zpR
     LDA #>5
@@ -1963,7 +2367,10 @@ __L33:
     LDA __zpR+1
     STA __fn_print_int_v_n+1
     JSR __fn_print_int
+    JSR __fn_print_int_popframe
+    JSR __fn_nl_pushframe
     JSR __fn_nl
+    JSR __fn_nl_popframe
     LDA #<0
     STA __zpR
     LDA #>0
@@ -1976,16 +2383,18 @@ __L33:
     ADC #>__g_cbuf
     STA __zpAP+1
     LDA __zpAP
-    STA __zpAP2
+    STA __zpR
     LDA __zpAP+1
-    STA __zpAP2+1
+    STA __zpR+1
+    JSR __rt_push
     LDA #<88
     STA __zpR
     LDA #>88
     STA __zpR+1
-    LDA __zpAP2
+    JSR __rt_pop2
+    LDA __zpR2
     STA __zpAP
-    LDA __zpAP2+1
+    LDA __zpR2+1
     STA __zpAP+1
     LDY #0
     LDA __zpR
@@ -1994,25 +2403,20 @@ __L33:
     STA __zpR
     LDA #>1024
     STA __zpR+1
-    LDA __zpR
-    STA __zpAP
-    LDA __zpR+1
-    STA __zpAP+1
-    LDA __zpAP
-    STA __zpAP2
-    LDA __zpAP+1
-    STA __zpAP2+1
+    JSR __rt_push
     LDA #<65
     STA __zpR
     LDA #>65
     STA __zpR+1
-    LDA __zpAP2
+    JSR __rt_pop2
+    LDA __zpR2
     STA __zpAP
-    LDA __zpAP2+1
+    LDA __zpR2+1
     STA __zpAP+1
     LDY #0
     LDA __zpR
     STA (__zpAP),Y
+    JSR __fn_print_int_pushframe
     LDA #<1024
     STA __zpR
     LDA #>1024
@@ -2031,7 +2435,10 @@ __L33:
     LDA __zpR+1
     STA __fn_print_int_v_n+1
     JSR __fn_print_int
+    JSR __fn_print_int_popframe
+    JSR __fn_nl_pushframe
     JSR __fn_nl
+    JSR __fn_nl_popframe
     LDA #<0
     STA __zpR
     LDA #>0
@@ -2051,7 +2458,9 @@ __L33:
     JSR __rt_topetscii
     LDA __zpR
     JSR __CHROUT
+    JSR __fn_nl_pushframe
     JSR __fn_nl
+    JSR __fn_nl_popframe
     LDA #<0
     STA __zpR
     LDA #>0
@@ -2170,6 +2579,7 @@ __L38:
     STA __fn_main_v_i+1
     JMP __L36
 __L37:
+    JSR __fn_print_int_pushframe
     LDA __fn_main_v_x
     STA __zpR
     LDA __fn_main_v_x+1
@@ -2179,7 +2589,10 @@ __L37:
     LDA __zpR+1
     STA __fn_print_int_v_n+1
     JSR __fn_print_int
+    JSR __fn_print_int_popframe
+    JSR __fn_nl_pushframe
     JSR __fn_nl
+    JSR __fn_nl_popframe
     LDA #<5
     STA __zpR
     LDA #>5
@@ -2188,6 +2601,7 @@ __L37:
     STA __fn_main_v_i
     LDA __zpR+1
     STA __fn_main_v_i+1
+    JSR __fn_print_int_pushframe
     LDA __fn_main_v_i
     STA __zpR
     LDA __fn_main_v_i+1
@@ -2216,7 +2630,11 @@ __L37:
     LDA __zpR+1
     STA __fn_print_int_v_n+1
     JSR __fn_print_int
+    JSR __fn_print_int_popframe
+    JSR __fn_nl_pushframe
     JSR __fn_nl
+    JSR __fn_nl_popframe
+    JSR __fn_print_int_pushframe
     LDA __fn_main_v_i
     STA __zpR
     LDA __fn_main_v_i+1
@@ -2226,7 +2644,11 @@ __L37:
     LDA __zpR+1
     STA __fn_print_int_v_n+1
     JSR __fn_print_int
+    JSR __fn_print_int_popframe
+    JSR __fn_nl_pushframe
     JSR __fn_nl
+    JSR __fn_nl_popframe
+    JSR __fn_print_int_pushframe
     LDA __fn_main_v_i
     STA __zpR
     LDA __fn_main_v_i+1
@@ -2247,18 +2669,34 @@ __L37:
     LDA __zpR+1
     STA __fn_print_int_v_n+1
     JSR __fn_print_int
+    JSR __fn_print_int_popframe
+    JSR __fn_nl_pushframe
     JSR __fn_nl
-    LDA #<__str_0
+    JSR __fn_nl_popframe
+    LDA #<__str_2
     STA __zpR
-    LDA #>__str_0
+    LDA #>__str_2
     STA __zpR+1
     JSR __rt_puts
     RTS
  
 ; ---- string literals (raw bytes; __rt_puts converts at print time) ----
 __str_0:
+    .byte 13,67,67,54,52,32,82,85,78,84,73,77,69,32,69,82,82,79,82,58,32,67,65,76,76,32,83,84,65,67,75,32
+    .byte 79,86,69,82,70,76,79,87,13,40,82,69,67,85,82,83,73,79,78,32,84,79,79,32,68,69,69,80,44,32,79,82
+    .byte 32,77,73,83,83,73,78,71,32,66,65,83,69,32,67,65,83,69,41,13,0
+__str_1:
+    .byte 13,67,67,54,52,32,82,85,78,84,73,77,69,32,69,82,82,79,82,58,32,69,88,80,82,69,83,83,73,79,78,32
+    .byte 83,84,65,67,75,32,79,86,69,82,70,76,79,87,13,40,69,88,80,82,69,83,83,73,79,78,83,32,78,69,83,84
+    .byte 69,68,32,84,79,79,32,68,69,69,80,76,89,32,65,67,82,79,83,83,32,82,69,67,85,82,83,73,79,78,41,13
+    .byte 0
+__str_2:
     .byte 68,79,78,69,46,0
  
 ; ---- operand stack (128 16-bit slots, indexed by __rt_spidx) -------
 __rt_stack:
     .fill 256, 0
+; ---- call stack (4096 bytes; see codegen_stmt.c's emit_function() ---
+; ---- and codegen_runtime.c's cstack-check comment for what this is)--
+__rt_cstack:
+    .fill 4096, 0

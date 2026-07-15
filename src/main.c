@@ -14,22 +14,28 @@
 
 #include "cc64.h"
 
-static char *read_file(const char *path) {
-    FILE *f = fopen(path, "rb");
-    if (!f) { fprintf(stderr, "cc64: cannot open '%s'\n", path); exit(1); }
-    fseek(f, 0, SEEK_END);
-    long sz = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    char *buf = xmalloc(sz + 1);
-    size_t rd = fread(buf, 1, sz, f);
-    buf[rd] = '\0';
-    fclose(f);
-    return buf;
-}
-
 static void usage(const char *prog) {
     fprintf(stderr, "cc64 - a minimal C compiler for the Commodore 64 (6502 target)\n\n");
-    fprintf(stderr, "Usage: %s <input.c> -o <output.asm>\n", prog);
+    fprintf(stderr, "Usage: %s <input.c> -o <output.asm> [-I dir ...]\n", prog);
+}
+
+/* Best-effort default for `#include <...>`: if cc64 was invoked with
+ * a path (like the `./cc64` this project's own docs and build.sh
+ * always use), add a "lib" directory next to the binary - which is
+ * exactly where this project's own lib/ lives, so `#include <string.h>`
+ * works out of the box with no -I needed. If cc64 was found via PATH
+ * (argv[0] has no '/' in it), there's no portable, C99-only way to
+ * recover the binary's real location, so this is silently skipped;
+ * -I (or running from the project directory) still works either way. */
+static void add_default_lib_dir(const char *argv0) {
+    const char *slash = strrchr(argv0, '/');
+    if (!slash) return;
+    size_t dirlen = (size_t)(slash - argv0);
+    char *dir = xmalloc(dirlen + 5); /* + "/lib" + NUL */
+    memcpy(dir, argv0, dirlen);
+    memcpy(dir + dirlen, "/lib", 5);
+    add_include_dir(dir);
+    free(dir);
 }
 
 int main(int argc, char **argv) {
@@ -38,6 +44,11 @@ int main(int argc, char **argv) {
         if (strcmp(argv[i], "-o") == 0) {
             if (i + 1 >= argc) { usage(argv[0]); return 1; }
             output_path = argv[++i];
+        } else if (strcmp(argv[i], "-I") == 0) {
+            if (i + 1 >= argc) { usage(argv[0]); return 1; }
+            add_include_dir(argv[++i]);
+        } else if (strncmp(argv[i], "-I", 2) == 0 && argv[i][2] != '\0') {
+            add_include_dir(argv[i] + 2); /* -Idir, no space, same as gcc/clang */
         } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
             usage(argv[0]); return 0;
         } else if (argv[i][0] != '-' && !input_path) {
@@ -48,13 +59,15 @@ int main(int argc, char **argv) {
         }
     }
     if (!input_path || !output_path) { usage(argv[0]); return 1; }
+    add_default_lib_dir(argv[0]);
 
     /* Phase 1: lexing. Turns the whole source file into g_toks[] up
      * front - see lexer.c's header comment for why that (rather than
      * producing tokens one at a time on demand) is what makes the
-     * two-pass parsing strategy below possible. */
-    char *src = read_file(input_path);
-    lex(src);
+     * two-pass parsing strategy below possible. lex_file() also
+     * follows any #include directives it finds, recursively - see
+     * cc64.h's "HOW #include WORKS" note. */
+    lex_file(input_path);
 
     /* Phase 2: the shallow declaration pass. After this, every
      * function's signature and every global's type is known, even

@@ -9,7 +9,10 @@
  * course. If you're new to how compilers are built, this is a
  * reasonable order to read the source in:
  *
- *   1. lexer.c        Source text -> a flat array of Tokens.
+ *   1. lexer.c        Source text -> a flat array of Tokens. Also
+ *                      handles `#include`, since splicing another
+ *                      file's tokens in is naturally a lexer-level
+ *                      operation - see below.
  *   2. ast.c           Defines the tree shape parsing builds (Node).
  *   3. symtab.c        Symbol tables (what's declared, and as what
  *                      type) plus a tiny type inference helper used
@@ -77,6 +80,24 @@
  * above emit_function() in codegen_stmt.c; the runtime pieces it
  * relies on are described above __rt_cstack_check in
  * codegen_runtime.c.
+ *
+ * HOW #include WORKS
+ * ---------------------
+ * There's no general preprocessor - no #define, no #ifdef, nothing
+ * but #include - so this doesn't need its own compilation phase.
+ * lex_file() (lexer.c) recognizes `#include "..."` or `#include <...>`
+ * while it's scanning a file's text, resolves the named file to a
+ * path (quoted forms check the including file's own directory first,
+ * then fall back, same as angle-bracket forms, to searching the -I
+ * directories given on the command line), and if that resolved path
+ * hasn't been seen before *anywhere in this compile*, recursively
+ * lexes it right then and there - so its tokens land exactly where
+ * the #include appeared, before lexing of the including file resumes.
+ * Every file is implicitly include-once (tracked by resolved path),
+ * so headers don't need manual include guards. Because this all
+ * happens before parsing starts, pass_a()/pass_b() never know or care
+ * that an #include happened at all - to them it's just a longer
+ * token stream, exactly as if the text had been pasted in by hand.
  * =======================================================================
  */
 
@@ -232,7 +253,8 @@ int var_width(int type, int isPointer); /* 1 or 2 bytes, for storage sizing */
 extern Token *g_toks;
 extern int g_ntoks;
 
-void lex(const char *src); /* fills g_toks/g_ntoks from source text */
+void lex_file(const char *path); /* fills g_toks/g_ntoks from a file, following #include */
+void add_include_dir(const char *dir); /* an -I directory searched for `#include <...>` */
 
 /* ===================================================================
  * Parsing and semantic checks
@@ -280,5 +302,6 @@ void fatal(int line, const char *fmt, ...); /* prints "cc64: error: ..." and exi
 void *xmalloc(size_t n);
 void *xrealloc(void *p, size_t n);
 char *xstrdup(const char *s);
+char *read_file(const char *path); /* whole-file-into-a-string; shared by main.c and lexer.c */
 
 #endif /* CC64_H */
