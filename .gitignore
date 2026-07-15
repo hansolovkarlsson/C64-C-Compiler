@@ -4,3 +4,5 @@ r
 notes/
 vice.log
 archive/
+bin/c64asm
+bin/cc64
