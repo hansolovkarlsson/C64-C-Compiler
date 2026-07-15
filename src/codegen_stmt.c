@@ -161,32 +161,162 @@ void emit_global_storage(void) {
     emit(" ");
 }
 
-/* One function's storage (parameters, then locals - see cc64.h's
- * architecture note on why these get FIXED addresses instead of a
- * stack frame) followed by its actual code. Called once per function
- * by pass_b() in parser.c, right after that function's body has been
- * parsed. The trailing RTS handles a function that "falls off the
- * end" without an explicit return - falling off the end of a non-void
- * function is undefined behavior in real C, but this compiler would
- * rather emit a harmless extra RTS than generate a function that
- * doesn't return at all. */
+/* ===================================================================
+ * Supporting recursion despite fixed-address storage
+ * ===================================================================
+ * cc64 still gives every function's parameters and locals ONE fixed
+ * memory address each (see cc64.h's architecture note) - that part
+ * hasn't changed, and neither has how a function reads or writes its
+ * own locals (gen_load_scalar/gen_store_scalar in codegen_expr.c are
+ * completely unaware any of this exists). What's new is that the
+ * CALLER now saves the callee's current frame contents to a software
+ * stack before overwriting them with a new call's arguments, and
+ * restores them after the call returns - so a function calling
+ * itself (directly, or indirectly through some chain of other calls)
+ * finds its own storage exactly as it left it once the inner call
+ * unwinds, even though the inner call was temporarily using that same
+ * memory for its own, different invocation.
+ *
+ * Concretely: for every function `foo`, emit_function() below emits
+ * two extra routines, `__fn_foo_pushframe` and `__fn_foo_popframe`,
+ * each hardcoded (unrolled at compile time, since a function's frame
+ * size never changes) to copy every byte of `foo`'s parameters and
+ * locals to/from a dedicated call stack (__rt_cstack, a large fixed
+ * buffer - see main.c - indexed by the 16-bit __rt_csp pointer).
+ * gen_call() in codegen_expr.c wraps every call to `foo` with
+ * `JSR __fn_foo_pushframe` right before storing the new arguments,
+ * and `JSR __fn_foo_popframe` right after the call returns. Because
+ * the push/pop routines are per-FUNCTION rather than per-CALL-SITE,
+ * a call site never needs to know its callee's frame size itself
+ * (which matters because, thanks to the two-pass design, a call can
+ * appear textually before the callee's locals have even been parsed
+ * yet - see parser.c) - it only ever needs to know the callee's
+ * NAME, which is always available.
+ *
+ * Trace through a small example if this isn't clicking yet: for
+ * `int fact(int n) { if (n <= 1) return 1; return n * fact(n - 1); }`,
+ * calling fact(3) pushes fact's frame (saving whatever was there
+ * before - stale/irrelevant), sets n=3, and calls fact. Inside, computing
+ * `fact(n - 1)` pushes fact's frame AGAIN - this time saving n=3 - sets
+ * n=2, and recurses. This continues down to n=1, which returns without
+ * recursing further; unwinding back up, each return is immediately
+ * followed by a popframe that restores THAT level's n (2, then 3),
+ * so each stack frame's `n * fact(n-1)` multiplication happens with
+ * the correct n for that level, even though every level used the
+ * exact same memory address for its own copy of n.
+ * =================================================================== */
+
+/* One function's storage (parameters, then locals - all emitted
+ * CONSECUTIVELY, so together they form one contiguous block of frame
+ * memory starting at the __fn_<name>_frame label - the frame
+ * save/restore loops below depend on that contiguity), its
+ * pushframe/popframe routines (see the recursion comment above), and
+ * finally its actual code. Called once per function by pass_b() in
+ * parser.c, right after that function's body has been parsed. The
+ * trailing RTS handles a function that "falls off the end" without an
+ * explicit return - falling off the end of a non-void function is
+ * undefined behavior in real C, but this compiler would rather emit a
+ * harmless extra RTS than generate a function that doesn't return at
+ * all. */
 void emit_function(FnSym *fn, Node *body) {
     char flbl[96]; func_label(flbl, sizeof(flbl), fn->name);
     emit("; ---- function %s ---------------------------------------------", fn->name);
+
+    /* Storage. The __fn_<name>_frame label marks the start of the
+     * whole contiguous frame explicitly, so the copy loops below can
+     * address the entire frame as `frame,Y` without depending on
+     * knowing which variable happens to come first. */
+    int total = 0;
+    emit("__fn_%s_frame:", fn->name);
     for (int i = 0; i < fn->nparams; i++) {
         char lbl[96]; local_label(lbl, sizeof(lbl), fn->name, fn->paramNames[i]);
+        int w = var_width(fn->paramTypes[i], fn->paramIsPointer[i]);
         emit("%s:", lbl);
-        emit("    .fill %d, 0", var_width(fn->paramTypes[i], fn->paramIsPointer[i]));
+        emit("    .fill %d, 0", w);
+        total += w;
     }
     for (int i = 0; i < g_nlocals; i++) {
         if (g_locals[i].isParam) continue;
         char lbl[96]; local_label(lbl, sizeof(lbl), fn->name, g_locals[i].name);
-        int bytes = g_locals[i].isArray
+        int w = g_locals[i].isArray
             ? g_locals[i].arrLen * (g_locals[i].type == TY_INT ? 2 : 1) /* arrays of pointers not supported */
             : var_width(g_locals[i].type, g_locals[i].isPointer);
         emit("%s:", lbl);
-        emit("    .fill %d, 0", bytes);
+        emit("    .fill %d, 0", w);
+        total += w;
     }
+
+    /* The copy loops below count with the 8-bit Y register, which
+     * caps a recursion-capable frame at 256 bytes. (Exactly 256 still
+     * works: Y wraps 255 -> 0, and CPY #(256 & 0xFF) is CPY #0, so
+     * the loop exits exactly after byte 255.) A function carrying
+     * more than 256 bytes of locals is almost always a large local
+     * array, which is cheap to make global instead - and saving/
+     * restoring that much data on every single call would be painful
+     * anyway, so the limit doubles as a performance guard rail. */
+    if (total > 256)
+        fatal(0, "function '%s' has %d bytes of parameters+locals, which exceeds "
+                 "the 256-byte per-call frame limit; consider making large local "
+                 "arrays global", fn->name, total);
+
+    /* pushframe: copy the whole frame to the call stack, then advance
+     * __rt_csp past the saved copy. The copy runs BEFORE the pointer
+     * moves, so the frame lands at the pre-call __rt_csp position -
+     * exactly where popframe's subtract-then-copy will look for it. */
+    emit("__fn_%s_pushframe:", fn->name);
+    if (total == 0) {
+        emit("    RTS"); /* no params or locals - nothing to save */
+    } else {
+        emit("    LDA __rt_csp");
+        emit("    STA __zpAP");
+        emit("    LDA __rt_csp+1");
+        emit("    STA __zpAP+1");
+        emit("    LDY #0");
+        emit("__fn_%s_pushfr_loop:", fn->name);
+        emit("    LDA __fn_%s_frame,Y", fn->name);
+        emit("    STA (__zpAP),Y");
+        emit("    INY");
+        emit("    CPY #%d", total & 0xFF);
+        emit("    BNE __fn_%s_pushfr_loop", fn->name);
+        emit("    CLC");
+        emit("    LDA __rt_csp");
+        emit("    ADC #%d", total & 0xFF);
+        emit("    STA __rt_csp");
+        emit("    LDA __rt_csp+1");
+        emit("    ADC #%d", (total >> 8) & 0xFF);
+        emit("    STA __rt_csp+1");
+        emit("    JMP __rt_cstack_check"); /* tail call: check RTSes straight back to our caller */
+    }
+    emit(" ");
+
+    /* popframe: the exact reverse. Subtracting the (compile-time
+     * constant) frame size from __rt_csp both rewinds the pointer AND
+     * yields the base address to read the saved bytes back from, in
+     * one step. */
+    emit("__fn_%s_popframe:", fn->name);
+    if (total == 0) {
+        emit("    RTS");
+    } else {
+        emit("    SEC");
+        emit("    LDA __rt_csp");
+        emit("    SBC #%d", total & 0xFF);
+        emit("    STA __rt_csp");
+        emit("    STA __zpAP");
+        emit("    LDA __rt_csp+1");
+        emit("    SBC #%d", (total >> 8) & 0xFF);
+        emit("    STA __rt_csp+1");
+        emit("    STA __zpAP+1");
+        emit("    LDY #0");
+        emit("__fn_%s_popfr_loop:", fn->name);
+        emit("    LDA (__zpAP),Y");
+        emit("    STA __fn_%s_frame,Y", fn->name);
+        emit("    INY");
+        emit("    CPY #%d", total & 0xFF);
+        emit("    BNE __fn_%s_popfr_loop", fn->name);
+        emit("    RTS");
+    }
+    emit(" ");
+
     emit("%s:", flbl);
     gen_stmt(body);
     emit("    RTS"); /* fallback for functions that fall off the end */

@@ -1,9 +1,9 @@
 /*
  * main.c - the command-line driver. Reads the input file, then runs
  * the whole pipeline described in cc64.h's overview: lex -> pass_a
- * (scan signatures) -> check_no_recursion -> emit the fixed runtime
- * library -> pass_b (parse each function body, generating its code as
- * it goes) -> emit string literal data -> done.
+ * (scan signatures) -> emit the fixed runtime library -> pass_b
+ * (parse each function body, generating its code as it goes) -> emit
+ * string literal data -> done.
  *
  * This file is intentionally thin. Almost everything it does is call
  * one function from another module in the order the pipeline
@@ -63,20 +63,13 @@ int main(int argc, char **argv) {
     if (!find_func("main")) fatal(0, "no 'main' function defined");
     if (find_func("main")->nparams != 0) fatal(0, "'main' must take no parameters in this version");
 
-    /* Phase 3: semantic check. Must run after pass_a() (it needs
-     * every function's signature and body token-range) but before any
-     * code is generated - see recursion.c's header comment for why
-     * recursion specifically has to be caught before, not after,
-     * generating code for it. */
-    check_no_recursion();
-
     g_out = fopen(output_path, "w");
     if (!g_out) { fprintf(stderr, "cc64: cannot open output '%s'\n", output_path); return 1; }
 
-    /* Phase 4: emit the fixed program preamble and runtime library.
+    /* Phase 3: emit the fixed program preamble and runtime library.
      * This all happens BEFORE any user code is generated, which is
      * why the trampoline below can simply `JSR __fn_main` - by the
-     * time pass_b() (phase 5) generates __fn_main's actual code
+     * time pass_b() (phase 4) generates __fn_main's actual code
      * further down in the file, the assembler's own two-pass design
      * (see c64asm.c) will resolve that forward reference correctly,
      * the same way it resolves every other label in this compiler's
@@ -91,13 +84,17 @@ int main(int argc, char **argv) {
     emit("                      ; (the default charset only has graphics past $C0)");
     emit("    LDA #0");
     emit("    STA __rt_spidx");
+    emit("    LDA #<__rt_cstack ; call-stack pointer starts at the base of its buffer -");
+    emit("    STA __rt_csp      ; see codegen_stmt.c's emit_function() for how each");
+    emit("    LDA #>__rt_cstack ; function's push/popframe routines use it to support");
+    emit("    STA __rt_csp+1    ; recursion despite locals/params living at fixed addresses");
     emit("    JSR __fn_main");
     emit("    RTS");
     emit(" ");
     emit_runtime();
     emit_global_storage();
 
-    /* Phase 5: the real parse. Parses each function body in turn and
+    /* Phase 4: the real parse. Parses each function body in turn and
      * immediately generates its code (see pass_b() in parser.c and
      * emit_function() in codegen_stmt.c) - by the time this returns,
      * the entire program's code has been written to g_out, and every
@@ -105,7 +102,7 @@ int main(int argc, char **argv) {
      * intern_string() (codegen_runtime.c) but not yet written out. */
     pass_b();
 
-    /* Phase 6: now that pass_b() is done, every string literal in the
+    /* Phase 5: now that pass_b() is done, every string literal in the
      * program is known, so their backing byte data can finally be
      * emitted - see emit_string_literals()'s own comment in
      * codegen_runtime.c for why this has to happen last. */
@@ -114,6 +111,10 @@ int main(int argc, char **argv) {
     emit("; ---- operand stack (128 16-bit slots, indexed by __rt_spidx) -------");
     emit("__rt_stack:");
     emit("    .fill 256, 0");
+    emit("; ---- call stack (4096 bytes; see codegen_stmt.c's emit_function() ---");
+    emit("; ---- and codegen_runtime.c's cstack-check comment for what this is)--");
+    emit("__rt_cstack:");
+    emit("    .fill 4096, 0");
 
     fclose(g_out);
     fprintf(stderr, "cc64: wrote %s\n", output_path);

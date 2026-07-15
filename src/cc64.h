@@ -17,21 +17,20 @@
  *   4. parser.c        Tokens -> an AST, using recursive descent. Also
  *                      drives codegen function-by-function (see the
  *                      "two-pass" note below).
- *   5. recursion.c     A semantic check: reject recursive functions,
- *                      since this compiler's storage model can't
- *                      support them safely yet.
- *   6. codegen.c       Small shared codegen utilities used by both
+ *   5. codegen.c       Small shared codegen utilities used by both
  *                      codegen_expr.c and codegen_stmt.c.
- *   7. codegen_runtime.c  The fixed 6502 runtime library (multiply,
+ *   6. codegen_runtime.c  The fixed 6502 runtime library (multiply,
  *                      divide, comparisons, string printing, ...)
  *                      that every compiled program links against.
- *   8. codegen_expr.c  Turns an expression AST node into 6502
+ *   7. codegen_expr.c  Turns an expression AST node into 6502
  *                      instructions that leave the result in a
  *                      "register" (see ARCHITECTURE below).
- *   9. codegen_stmt.c  Turns a statement AST node into 6502
+ *   8. codegen_stmt.c  Turns a statement AST node into 6502
  *                      instructions; also emits the storage layout
- *                      for globals and whole functions.
- *  10. main.c          Command-line driver: read file -> lex -> parse
+ *                      for globals and whole functions, and the
+ *                      per-function frame save/restore routines that
+ *                      make recursion work (see below).
+ *   9. main.c          Command-line driver: read file -> lex -> parse
  *                      (which also triggers codegen) -> write output.
  *
  * WHY TWO PASSES OVER THE SOURCE
@@ -60,16 +59,24 @@
  * See the comment above emit_runtime() in codegen_runtime.c, and the
  * comment above gen_expr_to_R() in codegen_expr.c, for the details.
  *
- * WHY NO RECURSION (YET)
- * ------------------------
- * Because function calls can't recurse in this version, every
- * function's parameters and locals get FIXED, statically-allocated
- * memory (like very old non-reentrant compilers used) instead of a
- * proper per-call stack frame. That's a deliberate simplification:
- * no frame pointer, no stack-relative addressing, much simpler code
- * generation. recursion.c exists specifically to catch and reject the
- * one thing that storage model can't support, with a clear error
- * instead of silently corrupting memory at runtime.
+ * HOW RECURSION WORKS (GIVEN FIXED-ADDRESS STORAGE)
+ * ---------------------------------------------------
+ * Every function's parameters and locals get FIXED, statically-
+ * allocated memory (like very old non-reentrant compilers used)
+ * instead of a conventional per-call stack frame. That keeps the
+ * common case simple and fast: a function reading or writing its own
+ * variable is a plain absolute load/store, with no frame pointer and
+ * no stack-relative addressing anywhere in expression codegen.
+ * Recursion is layered ON TOP of that model rather than replacing
+ * it: every call site saves the callee's current frame contents to a
+ * software call stack before overwriting them with new arguments,
+ * and restores them after the call returns - so when a recursive
+ * chain unwinds, each level finds its variables exactly as it left
+ * them, even though every level used the same addresses. The full
+ * design (and a worked factorial example) is in the long comment
+ * above emit_function() in codegen_stmt.c; the runtime pieces it
+ * relies on are described above __rt_cstack_check in
+ * codegen_runtime.c.
  * =======================================================================
  */
 
@@ -83,7 +90,7 @@
 #include <stdarg.h>
 
 /* ===================================================================
- * Tokens (produced by lexer.c, consumed by parser.c and recursion.c)
+ * Tokens (produced by lexer.c, consumed by parser.c)
  * =================================================================== */
 
 typedef enum {
@@ -111,7 +118,7 @@ typedef struct {
 /* ===================================================================
  * AST (built by parser.c, walked by codegen_expr.c / codegen_stmt.c
  * and by the read-only scans in symtab.c's infer_type() and
- * recursion.c's build_call_graph())
+ * infer_type())
  * =================================================================== */
 
 typedef enum {
@@ -169,8 +176,7 @@ typedef struct {
     int hasInit;
 } GSym;
 
-/* A function's signature, plus enough bookkeeping (bodyStart/bodyEnd)
- * for recursion.c to scan the body's tokens without re-parsing it. */
+/* A function's signature - name, return type, and its parameters. */
 typedef struct {
     char name[64];
     int retType;       /* TY_CHAR, TY_INT, or -1 for void */
@@ -180,7 +186,6 @@ typedef struct {
     int paramIsPointer[32];
     char paramNames[32][64];
     int defined;         /* has a body been seen (not just a prototype)? */
-    int bodyStart, bodyEnd; /* token index range of '{' ... '}', inclusive/exclusive */
 } FnSym;
 
 /* A local variable or parameter's declared shape, scoped to whichever
@@ -221,7 +226,7 @@ int var_width(int type, int isPointer); /* 1 or 2 bytes, for storage sizing */
 
 /* ===================================================================
  * Tokens produced by the lexer (owned by lexer.c; read by parser.c
- * via the shared cursor position, and by recursion.c's raw token scan)
+ * via the shared cursor position)
  * =================================================================== */
 
 extern Token *g_toks;
@@ -235,7 +240,6 @@ void lex(const char *src); /* fills g_toks/g_ntoks from source text */
 
 void pass_a(void);          /* shallow pre-scan: signatures & globals only */
 void pass_b(void);          /* real parse of each function body + codegen */
-void check_no_recursion(void); /* rejects recursive call cycles at compile time */
 
 /* ===================================================================
  * Code generation - shared infrastructure (codegen.c)

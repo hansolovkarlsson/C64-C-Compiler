@@ -3,9 +3,10 @@
 `cc64` compiles a small subset of C directly to 6502 assembly in the
 exact syntax your `c64asm.c` assembler expects. This is built
 incrementally: get a solid, verified minimal subset working first (a
-step-1 "int/char, no pointers" core), then add features (pointers -
-done; recursion, structs, ... - not yet) on top of a foundation
-that's already known to generate correct code.
+step-1 "int/char, no pointers" core), then add features on top of a
+foundation that's already known to generate correct code. Pointers
+and full function recursion are both in now; structs and a small
+standard library are the likely next steps.
 
 The source is split into one file per compiler phase under `src/`,
 each with a substantial comment explaining what that phase does and
@@ -58,11 +59,10 @@ to approach the codebase for the first time:
 | `src/ast.c` | The AST node constructor |
 | `src/symtab.c` | Symbol tables, plus the minimal type inference used for pointer arithmetic |
 | `src/parser.c` | Recursive-descent parsing (tokens -> AST), and the two-pass driver (`pass_a`/`pass_b`) |
-| `src/recursion.c` | Rejects recursive functions at compile time (call-graph cycle detection) |
 | `src/codegen.c` | Shared codegen utilities: emitting a line of assembly, label generation |
 | `src/codegen_runtime.c` | The fixed 6502 runtime library (multiply, divide, comparisons, string printing) |
 | `src/codegen_expr.c` | Expression codegen - the largest file, where most operators and pointer handling live |
-| `src/codegen_stmt.c` | Statement codegen, plus emitting storage layout for globals and functions |
+| `src/codegen_stmt.c` | Statement codegen, storage layout, and the per-function frame save/restore routines that make recursion work |
 | `src/main.c` | The command-line driver tying every phase together |
 
 
@@ -81,11 +81,12 @@ to approach the codebase for the first time:
 - **Functions:** typed parameters (including pointer parameters),
   typed return value (including pointer return types), forward calls
   in any order (any function can call any other regardless of which
-  is defined first in the file - see "Two-pass compilation" below).
-  **No recursion**, direct or indirect - see "Why no recursion" below.
-  The compiler detects and rejects recursive call cycles at compile
-  time with a clear error, rather than letting them silently corrupt
-  data.
+  is defined first in the file - see "Two-pass compilation" below),
+  and **full recursion**, direct or mutual - see "How recursion
+  works" below for both the mechanism and its limits (a 256-byte
+  per-call frame cap, and runtime overflow guards that halt with a
+  clear on-screen error instead of silently corrupting memory when
+  recursion runs away).
 - **Pointers:** `&x` (address-of - works on scalars and array
   elements; safe on locals too, since there's no call stack for them
   to dangle from), `*p` (dereference, usable as both an rvalue and an
@@ -128,7 +129,7 @@ to approach the codebase for the first time:
 Pointer-to-pointer, function pointers, arrays of pointers, array
 *parameters* written with `[]` syntax (use `type *name` instead - it
 receives exactly the same decayed pointer), `struct`/`union`,
-`typedef`s, function recursion, multi-dimensional arrays, floating
+`typedef`s, multi-dimensional arrays, floating
 point, the preprocessor, `do`/`while`, `switch`, multiple source
 files, and anything like `printf` (there's no variadic support or
 number-to-string formatting - see `print_uint`/`print_int` in
@@ -137,24 +138,47 @@ into your own programs in the meantime).
 
 ## Design notes
 
-### Why no recursion (yet)
+### How recursion works
 
-Because there's no C-level recursion in this step, every function's
-parameters and local variables get **fixed, static storage** (like
-old-style non-reentrant compilers) instead of a real per-call stack
-frame. This is a deliberate simplification for the first step: it
-means no frame pointer, no stack-relative addressing, and much
-simpler code generation - fewer places for step-1 bugs to hide. A
-software *operand* stack is still used for evaluating nested
-expressions (`a * (b + c)` etc.) since that's independent of function
-recursion and will still be needed once real recursion is added.
+Every function's parameters and locals still get **fixed, static
+storage** (like old-style non-reentrant compilers) - reading or
+writing a variable is a plain absolute load/store, with no frame
+pointer or stack-relative addressing anywhere in expression codegen.
+Recursion is layered *on top of* that model rather than replacing it:
+for every function, the compiler emits a `pushframe` routine (copy
+that function's entire parameter+local block onto a software call
+stack) and a `popframe` routine (copy it back), and wraps every call
+site with them - save the callee's current frame, write the new
+arguments, `JSR`, then restore. When a recursive chain unwinds, each
+level finds its variables exactly as it left them, even though every
+level used the same physical addresses. The long comment above
+`emit_function()` in `src/codegen_stmt.c` walks through a factorial
+call step by step if you want to see the mechanism in motion.
 
-If you write a recursive function, `cc64` will refuse to compile it
-with a clear error rather than silently generating code that
-corrupts the function's own parameters/locals on re-entry. Now that
-pointers and indirect addressing exist, adding a real per-call stack
-frame (and lifting this restriction) is a smaller, more natural next
-step than it would have been starting from scratch.
+Two practical limits fall out of the design, both enforced rather
+than left as silent traps:
+
+- **A function's frame (parameters + locals, including local arrays)
+  can't exceed 256 bytes** - the frame copy loops count with the
+  6502's 8-bit Y register. Exceeding it is a *compile-time* error
+  suggesting the usual fix (make large local arrays global). This
+  doubles as a performance guard rail: every call copies the whole
+  frame twice, so a huge frame would make every call painfully slow
+  anyway.
+- **Runaway recursion halts with an on-screen error** instead of
+  silently corrupting memory. The runtime checks three exhaustion
+  risks on every call: the call stack outgrowing its 4 KB buffer, the
+  6502's own 256-byte hardware stack (which holds one `JSR` return
+  address per open call - the binding limit for deep recursion, at
+  roughly a hundred levels), and the expression operand stack (whose
+  entries can now be held across recursive calls - the `n` in
+  `n * fact(n - 1)` stays parked for the whole recursion beneath it).
+  Any of the three prints a `CC64 RUNTIME ERROR` message and stops.
+
+A software *operand* stack is still used for evaluating nested
+expressions (`a * (b + c)` etc.), exactly as before - it's
+independent of the call-frame machinery, though as noted above the
+two now interact when an operand is held across a recursive call.
 
 ### Two-pass compilation
 
@@ -288,15 +312,21 @@ to pointers across a function call, a classic pointer-swap, a
 function returning a pointer, and a string literal used as a real
 runtime `char*` value copied through a hand-written `copy_str`. Every
 computed value in both was checked against hand-calculated expected
-output. `tests/forward.c` checks that forward/backward call
+output. `tests/recursion.c` covers direct recursion (factorial),
+double recursion (fibonacci - an operand held on the expression stack
+across an entire recursive subtree), mutual recursion, recursion with
+per-level local arrays that must survive inner calls, recursive
+pointer walking, 80-deep recursion, and a regression check for a
+nested array-target assignment bug found while building the frame
+machinery. `tests/forward.c` checks that forward/backward call
 references both work regardless of declaration order. `tests/hello.c`
 is the basic smoke test for the whole pipeline (BASIC stub, zero-page
 init, stack init, `puts`/`putchar`, PETSCII case mapping).
 
-Run all four:
+Run all five:
 
 ```sh
-for f in hello features forward pointers; do
+for f in hello features forward pointers recursion; do
     ./cc64 tests/$f.c -o tests/$f.asm
     ./c64asm tests/$f.asm -o tests/$f.prg --listing tests/$f.lst
     python3 mini6502.py tests/$f.prg tests/$f.lst
@@ -307,13 +337,14 @@ done
 
 1. ~~Pointers and `&`/`*`~~ - done. Unlocked passing arrays to
    functions, `char*` strings as real runtime values, pointer
-   arithmetic, and is the prerequisite for...
-2. Function recursion - needs a real per-call stack frame for
-   parameters/locals instead of static storage, built on top of the
-   pointer/indirect-addressing support above. This is the natural
-   next step.
+   arithmetic, and was the prerequisite for...
+2. ~~Function recursion~~ - done, via per-function frame save/restore
+   around every call (see "How recursion works" above) rather than a
+   full stack-frame rewrite, so the fixed-address storage model and
+   all its codegen simplicity survived intact.
 3. `do`/`while`, `switch`.
-4. `struct`s (a natural pairing with pointers, once recursion is in).
+4. `struct`s (a natural pairing with pointers).
 5. A tiny standard library: real `printf`-lite, string helpers
-   (`strlen`, `strcpy`, etc., now easy to write in terms of `char*`).
+   (`strlen`, `strcpy`, etc., now easy to write in terms of `char*`
+   and recursion).
 6. Multiple source files / a simple `#include`.

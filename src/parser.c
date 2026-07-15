@@ -68,7 +68,7 @@
  * ===================================================================
  * g_pos is the parser's read position into g_toks[]. It's deliberately
  * NOT in cc64.h / exposed to other files: every other file that needs
- * to inspect tokens (recursion.c) reads g_toks[] directly with its own
+ * to inspect tokens could read g_toks[] directly with its own
  * index, and nothing outside this file ever needs to know "where the
  * parser currently is". Keeping it file-static is a small example of
  * information hiding - the rest of the compiler simply has no way to
@@ -192,9 +192,7 @@ void pass_a(void) {
             if (check(T_SEMI)) { advance(); continue; } /* prototype only */
             if (!check(T_LBRACE)) fatal(cur()->line, "expected '{' or ';'");
             fn->defined = 1;
-            fn->bodyStart = g_pos;
             skip_balanced(T_LBRACE, T_RBRACE);
-            fn->bodyEnd = g_pos; /* recursion.c scans exactly this token range */
             continue;
         }
 

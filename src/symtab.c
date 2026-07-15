@@ -19,12 +19,15 @@
  * complexity because it doesn't change any of the *interesting* parts
  * of how the compiler works.
  *
- * Because there's no C-level recursion (see cc64.h's architecture
- * overview), g_locals only ever needs to hold ONE function's worth of
- * locals at a time - there's no call stack of "which function's
- * locals are currently in scope" to maintain, which is a nice
- * simplification this compiler gets almost for free from its storage
- * model.
+ * g_locals only ever needs to hold ONE function's worth of locals at
+ * a time, because pass_b() (parser.c) fully parses and compiles each
+ * function before starting the next - there's never a moment where
+ * two functions' locals are both "in scope" from the COMPILER's point
+ * of view. (Note this is a fact about compile time, not run time:
+ * at run time, recursion means many invocations can be live at once,
+ * which the frame save/restore machinery in codegen_stmt.c handles -
+ * but they all share the same set of names and addresses, which is
+ * all the symbol table cares about.)
  */
 
 #include "cc64.h"
@@ -154,8 +157,26 @@ CType infer_type(Node *n) {
         case N_ASSIGN: case N_COMPOUND_ASSIGN:
         case N_PREINC: case N_PREDEC: case N_POSTINC: case N_POSTDEC:
             return infer_type(n->a);
+        case N_BINOP: {
+            /* Pointer arithmetic: `p + n`, `n + p`, and `p - n` are
+             * all still pointers (to the same base type); `p - q`
+             * (pointer minus pointer) is an element COUNT - a plain
+             * int - not a pointer. Everything else (both operands
+             * plain) is a plain int. This has to match what
+             * gen_expr_to_R()'s N_BINOP case in codegen_expr.c
+             * actually generates, or expressions like f(s + 1) would
+             * be misjudged by the argument type checks. */
+            if (strcmp(n->op, "+") == 0 || strcmp(n->op, "-") == 0) {
+                CType ta = infer_type(n->a), tb = infer_type(n->b);
+                if (ta.isPointer && tb.isPointer)
+                    return (CType){ TY_INT, 0 }; /* ptr - ptr = element count */
+                if (ta.isPointer) return ta;
+                if (tb.isPointer) return tb;
+            }
+            return (CType){ TY_INT, 0 };
+        }
         default:
-            return (CType){ TY_INT, 0 }; /* binops, logicals, literals, unary -/!/~ */
+            return (CType){ TY_INT, 0 }; /* logicals, literals, unary -/!/~ */
     }
 }
 

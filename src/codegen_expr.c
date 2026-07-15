@@ -353,19 +353,16 @@ static void gen_call(Node *n) {
     if (strcmp(n->name, "poke") == 0) {
         int cnt = 0; for (Node *a = n->a; a; a = a->next) cnt++;
         if (cnt != 2) fatal(n->line, "poke() takes exactly 2 arguments (addr, value)");
-        gen_expr_to_R(n->a);
-        emit("    LDA __zpR");
+        gen_expr_to_R(n->a);       /* address -> R */
+        emit("    JSR __rt_push"); /* park it on the operand stack while the value
+                                    * expression runs (which may use __zpAP itself,
+                                    * or contain a function call - see N_ASSIGN's
+                                    * comment for the same pattern) */
+        gen_expr_to_R(n->a->next); /* value -> R */
+        emit("    JSR __rt_pop2"); /* address -> R2 */
+        emit("    LDA __zpR2");
         emit("    STA __zpAP");
-        emit("    LDA __zpR+1");
-        emit("    STA __zpAP+1");
-        emit("    LDA __zpAP");
-        emit("    STA __zpAP2");
-        emit("    LDA __zpAP+1");
-        emit("    STA __zpAP2+1");
-        gen_expr_to_R(n->a->next); /* may clobber __zpAP if it touches an array */
-        emit("    LDA __zpAP2");
-        emit("    STA __zpAP");
-        emit("    LDA __zpAP2+1");
+        emit("    LDA __zpR2+1");
         emit("    STA __zpAP+1");
         emit("    LDY #0");
         emit("    LDA __zpR");
@@ -379,6 +376,20 @@ static void gen_call(Node *n) {
     int cnt = 0; for (Node *a = n->a; a; a = a->next) cnt++;
     if (cnt != fn->nparams)
         fatal(n->line, "function '%s' expects %d argument(s), got %d", n->name, fn->nparams, cnt);
+    char flbl[96], pushlbl[96], poplbl[96];
+    func_label(flbl, sizeof(flbl), fn->name);
+    snprintf(pushlbl, sizeof(pushlbl), "__fn_%s_pushframe", fn->name);
+    snprintf(poplbl, sizeof(poplbl), "__fn_%s_popframe", fn->name);
+    /* Save the callee's current frame BEFORE writing this call's
+     * arguments into it - see the long comment above emit_function()
+     * in codegen_stmt.c for why this is what makes recursion safe.
+     * This has to happen before evaluating the arguments themselves
+     * too: an argument expression can itself call `fn` again (directly
+     * recursive arguments like `fact(fact(3))` are rare but must still
+     * work), and pushframe only reads/saves the current values without
+     * disturbing them, so evaluating arguments right after it still
+     * sees the correct pre-call state. */
+    emit("    JSR %s", pushlbl);
     Node *a = n->a;
     for (int i = 0; i < fn->nparams; i++, a = a->next) {
         CType at = infer_type(a);
@@ -392,9 +403,13 @@ static void gen_call(Node *n) {
         local_label(lbl, sizeof(lbl), fn->name, fn->paramNames[i]);
         gen_store_scalar(lbl, fn->paramTypes[i], fn->paramIsPointer[i]);
     }
-    char flbl[96];
-    func_label(flbl, sizeof(flbl), fn->name);
     emit("    JSR %s", flbl);
+    /* The return value is already sitting in __zpR at this point (see
+     * cc64.h's calling-convention note) and popframe never touches
+     * __zpR/__zpR2, only this function's own labeled storage, so it's
+     * safe to restore the caller's view of `fn`'s frame now without
+     * disturbing the value the caller is about to use. */
+    emit("    JSR %s", poplbl);
 }
 
 /* ===================================================================
@@ -536,17 +551,29 @@ void gen_expr_to_R(Node *n) {
             return;
         case N_ASSIGN: {
             LVInfo lv; resolve_lvalue_base(n->a, &lv);
+            /* If the target is accessed through __zpAP (an array
+             * element, *p, or p[i]), that address must survive
+             * evaluating the right-hand side - which can itself use
+             * __zpAP (another array access), or contain a function
+             * call whose frame save/restore borrows __zpAP. Saving it
+             * on the operand stack (rather than in a single fixed
+             * scratch slot, as an earlier version did) makes this nest
+             * correctly to any depth: `a[i] = (b[j] = f(x)) + 1` has
+             * two saved addresses live at once, and a stack is exactly
+             * the structure that handles that. */
             if (lv.isArray) {
                 emit("    LDA __zpAP");
-                emit("    STA __zpAP2");
+                emit("    STA __zpR");
                 emit("    LDA __zpAP+1");
-                emit("    STA __zpAP2+1");
+                emit("    STA __zpR+1");
+                emit("    JSR __rt_push");
             }
-            gen_expr_to_R(n->b); /* rhs may itself use __zpAP; restore afterward */
+            gen_expr_to_R(n->b);
             if (lv.isArray) {
-                emit("    LDA __zpAP2");
+                emit("    JSR __rt_pop2"); /* saved address -> __zpR2 (leaves the RHS value in __zpR untouched) */
+                emit("    LDA __zpR2");
                 emit("    STA __zpAP");
-                emit("    LDA __zpAP2+1");
+                emit("    LDA __zpR2+1");
                 emit("    STA __zpAP+1");
             }
             gen_lv_store_from_R(&lv);
@@ -554,11 +581,21 @@ void gen_expr_to_R(Node *n) {
         }
         case N_COMPOUND_ASSIGN: {
             LVInfo lv; resolve_lvalue_base(n->a, &lv);
+            /* Same operand-stack address-saving as N_ASSIGN above,
+             * with one wrinkle: BOTH the saved address and the
+             * target's current value need to survive the RHS
+             * evaluation, so both go on the operand stack - address
+             * first, current value on top of it, which is exactly the
+             * order the two pops after the RHS want them back in
+             * (value first for the binop, address last for the store). */
             if (lv.isArray) {
                 emit("    LDA __zpAP");
-                emit("    STA __zpAP2");
+                emit("    STA __zpR");
                 emit("    LDA __zpAP+1");
-                emit("    STA __zpAP2+1");
+                emit("    STA __zpR+1");
+                emit("    JSR __rt_push");
+                /* copying AP into R clobbered R, but nothing was live
+                 * there; AP itself is still intact for the load below */
             }
             int scalePtr = lv.isPointer && (strcmp(n->op, "+") == 0 || strcmp(n->op, "-") == 0);
             int esize = (lv.type == TY_INT) ? 2 : 1;
@@ -572,9 +609,10 @@ void gen_expr_to_R(Node *n) {
             emit("    JSR __rt_pop2"); /* __zpR2 = old value, __zpR = rhs value */
             gen_binop(n->op, 0);
             if (lv.isArray) {
-                emit("    LDA __zpAP2");
+                emit("    JSR __rt_pop2"); /* saved address -> __zpR2 (result stays in __zpR) */
+                emit("    LDA __zpR2");
                 emit("    STA __zpAP");
-                emit("    LDA __zpAP2+1");
+                emit("    LDA __zpR2+1");
                 emit("    STA __zpAP+1");
             }
             gen_lv_store_from_R(&lv);

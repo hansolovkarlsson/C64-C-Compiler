@@ -55,6 +55,7 @@ class CPU:
         self.c = 0; self.z = 0; self.n = 0; self.v = 0
         self.output = []
         self.lowercase_mode = False  # C64 boots into charset 1 (uppercase/graphics)
+        self.halted_at = None  # set if the program hit a JMP-to-self halt idiom
         self.steps = 0
         self.max_steps = 20_000_000
 
@@ -132,6 +133,11 @@ class CPU:
             self.a = self.setzn(self.read(self.abs_() + self.x))
         elif op == 0x9D:                                              # STA abs,X
             self.write(self.abs_() + self.x, self.a)
+        elif op == 0xB9:                                              # LDA abs,Y
+            self.a = self.setzn(self.read(self.abs_() + self.y))
+        elif op == 0x99:                                              # STA abs,Y
+            self.write(self.abs_() + self.y, self.a)
+        elif op == 0xBA: self.x = self.setzn(self.sp)                 # TSX
         elif op == 0xA0: self.y = self.setzn(self.imm())             # LDY #imm
         elif op == 0xA4: self.y = self.setzn(self.read(self.zp()))   # LDY zp
         elif op == 0xAC: self.y = self.setzn(self.read(self.abs_())) # LDY abs
@@ -249,7 +255,17 @@ class CPU:
             v = self.imm(); self._cmp(self.y, v)
         elif op == 0xCC:                                              # CPY abs
             v = self.read(self.abs_()); self._cmp(self.y, v)
-        elif op == 0x4C: self.pc = self.abs_()                        # JMP abs
+        elif op == 0x4C:                                              # JMP abs
+            target = self.abs_()
+            if target == self.pc - 3:
+                # JMP to itself: the standard "halt" idiom (used by the
+                # cc64 runtime's overflow handlers after printing an
+                # error). Treat as a clean stop so the error message is
+                # visible, rather than spinning to the step limit.
+                self.halted_at = target
+                self.pc = 0x0000
+                return
+            self.pc = target
         elif op == 0x20:                                              # JSR abs
             target = self.abs_()
             ret = self.pc - 1
@@ -321,7 +337,10 @@ def main():
     cpu.run(entry)
     sys.stdout.write("".join(cpu.output))
     sys.stdout.write("\n")
-    sys.stderr.write("[ok: %d instructions executed]\n" % cpu.steps)
+    if cpu.halted_at is not None:
+        sys.stderr.write("[halted at $%04X via JMP-to-self after %d instructions]\n" % (cpu.halted_at, cpu.steps))
+    else:
+        sys.stderr.write("[ok: %d instructions executed]\n" % cpu.steps)
 
 if __name__ == "__main__":
     main()

@@ -78,12 +78,22 @@ void emit_zp_equates(void) {
 }
 
 void emit_runtime(void) {
+    /* Registered here (rather than at the point it's used, further
+     * down) so it's easy to find; intern_string() just records the
+     * text and hands back a label - the actual bytes aren't written
+     * out until emit_string_literals() runs, at the very end of
+     * compilation, once every string literal anywhere in the program
+     * (the user's and this one) is known. See intern_string()'s own
+     * comment, below, for the full explanation. */
+    char *overflow_msg_label = intern_string("\rCC64 RUNTIME ERROR: CALL STACK OVERFLOW\r(RECURSION TOO DEEP, OR MISSING BASE CASE)\r");
+    char *expr_overflow_msg_label = intern_string("\rCC64 RUNTIME ERROR: EXPRESSION STACK OVERFLOW\r(EXPRESSIONS NESTED TOO DEEPLY ACROSS RECURSION)\r");
+
     emit("; ---- runtime scratch storage (plain RAM, NOT zero page - only __zpAP");
     emit("; needs (zp),Y indirection; these are always accessed directly) -------");
     emit("__rt_spidx:"); /* operand-stack index (0-255; stack holds 128 slots) */
     emit("    .byte 0");
-    emit("__zpAP2:"); /* saved-AP scratch across RHS evaluation of assignments */
-    emit("    .fill 2, 0");
+    emit("__rt_csp:"); /* call-stack pointer (16-bit; see the pushframe/popframe */
+    emit("    .fill 2, 0"); /* comment below for what this supports) */
     emit("__zpT1:"); /* runtime scratch (sign flags in __rt_sdivmod16) */
     emit("    .fill 2, 0");
     emit("__zpT0:"); /* runtime scratch (division remainder, multiply accumulator) */
@@ -119,6 +129,26 @@ void emit_runtime(void) {
     emit("    INX");
     emit("    INX");
     emit("    STX __rt_spidx");
+    /* Overflow check. Before recursion existed this stack could only
+     * hold one expression's worth of pending operands at a time, and
+     * no sane expression nests 128 deep - but an operand held across
+     * a recursive call (the `n` in `n * fact(n - 1)`) stays on this
+     * stack for the whole depth of the recursion below it, so depth
+     * now multiplies into usage and the limit is genuinely reachable.
+     * X always moves in steps of 2 from 0, so overflowing 256 lands
+     * exactly on 0 - one BNE catches it. (The write above used the
+     * last two in-bounds bytes, 254/255, so nothing was corrupted;
+     * this halts before the NEXT push would wrap around and start
+     * silently overwriting the bottom of the stack.) */
+    emit("    BNE __rt_push_ok");
+    emit("    LDA #<%s", expr_overflow_msg_label);
+    emit("    STA __zpR");
+    emit("    LDA #>%s", expr_overflow_msg_label);
+    emit("    STA __zpR+1");
+    emit("    JSR __rt_puts");
+    emit("__rt_push_halt:");
+    emit("    JMP __rt_push_halt");
+    emit("__rt_push_ok:");
     emit("    RTS");
     emit(" ");
     emit("__rt_pop2:"); /* pop the top of the operand stack into __zpR2 */
@@ -130,6 +160,76 @@ void emit_runtime(void) {
     emit("    LDA __rt_stack+1,X");
     emit("    STA __zpR2+1");
     emit("    STX __rt_spidx");
+    emit("    RTS");
+    emit(" ");
+    /* Recursion support: see this file's header comment and the much
+     * longer one above emit_function() in codegen_stmt.c for the full
+     * design. Short version: every function call now saves the
+     * callee's current parameter/local values to this call stack
+     * before overwriting them with the new call's arguments, and
+     * restores them after the call returns - which is what makes it
+     * safe for a function to call itself (or call another function
+     * that calls it back) despite every function's storage living at
+     * a single fixed address. __rt_csp is a 16-bit pointer (unlike
+     * __rt_spidx above) since a deep call chain can need more than
+     * 256 bytes of saved frames; the (zp),Y addressing that requires
+     * borrows __zpAP for the duration of each push/pop, which is safe
+     * because nothing that needs __zpAP to survive across a function
+     * call ever calls one without first parking that address on the
+     * operand stack - see gen_expr_to_R()'s N_ASSIGN/N_COMPOUND_ASSIGN
+     * cases and gen_call()'s poke() handling in codegen_expr.c, which
+     * already had to solve exactly this problem for array/pointer
+     * writes whose right-hand side might itself use __zpAP, before
+     * recursion existed at all.
+     *
+     * This routine runs at the end of every per-function "pushframe"
+     * routine (see codegen_stmt.c) and checks TWO independent
+     * exhaustion risks that deep recursion creates:
+     *
+     * 1. The call stack itself outgrowing its fixed buffer. Note the
+     *    check runs just AFTER the frame bytes were copied, not
+     *    before - an overflowing copy therefore spills past the
+     *    buffer's end before being caught. That's deliberate, and
+     *    safe, because main.c places __rt_cstack as the LAST thing in
+     *    the program: the bytes past its end are free RAM that
+     *    nothing owns, so a spill there is harmless, and putting the
+     *    check after the copy keeps it a single shared routine that
+     *    doesn't need to know each function's frame size.
+     *
+     * 2. The 6502's own hardware stack (page 1, 256 bytes, used for
+     *    JSR return addresses) filling up - each recursion level
+     *    holds one return address (2 bytes) for the whole depth of
+     *    the recursion, so ~100 levels of depth exhausts it no matter
+     *    how small the C-level frames are. TSX reads the hardware
+     *    stack pointer into X; if it's dropped below a safety margin
+     *    (enough headroom for the runtime library's own JSR nesting),
+     *    stop before the next JSR silently overwrites page-1 data.
+     *
+     * Either way, halting loudly with a message beats what would
+     * happen otherwise: runaway recursion (a missing or wrong base
+     * case) silently corrupting memory, which is a miserable thing
+     * to have to debug on a C64. */
+    emit("__rt_cstack_check:");
+    emit("    TSX");
+    emit("    CPX #$20");
+    emit("    BCC __rt_csc_overflow");
+    emit("    LDA __rt_csp+1");
+    emit("    CMP #>(__rt_cstack+4096)");
+    emit("    BCC __rt_csc_ok");
+    emit("    BNE __rt_csc_overflow");
+    emit("    LDA __rt_csp");
+    emit("    CMP #<(__rt_cstack+4096)");
+    emit("    BCC __rt_csc_ok");
+    emit("    BEQ __rt_csc_ok");
+    emit("__rt_csc_overflow:");
+    emit("    LDA #<%s", overflow_msg_label);
+    emit("    STA __zpR");
+    emit("    LDA #>%s", overflow_msg_label);
+    emit("    STA __zpR+1");
+    emit("    JSR __rt_puts");
+    emit("__rt_csc_halt:"); /* nothing graceful to do here - stop visibly rather */
+    emit("    JMP __rt_csc_halt"); /* than silently corrupt memory or misbehave */
+    emit("__rt_csc_ok:");
     emit("    RTS");
     emit(" ");
     /* 16x16->16 unsigned multiply, shift-and-add (the standard "grade
@@ -664,16 +764,40 @@ char *intern_string(const char *s) {
  * numeric `.byte N,N,N,...` rather than c64asm.c's quoted-string form
  * (`.byte "..."`) is what avoids that directive's own built-in
  * ASCII->PETSCII conversion - these bytes need to stay exactly as
- * they are in the source, for the reasons explained above. */
+ * they are in the source, for the reasons explained above.
+ *
+ * The bytes are deliberately CHUNKED across multiple .byte lines (32
+ * values each; consecutive .byte directives assemble to contiguous
+ * memory, so this changes nothing about the data) because c64asm.c's
+ * argument splitter has a fixed MAX_ARGS of 64 and SILENTLY DROPS
+ * anything past it - a single long string emitted as one giant line
+ * loses its tail, including the 0 terminator, and __rt_puts then
+ * walks straight past the string's end into whatever data follows.
+ * That failure mode was found the hard way: the runtime's own ~90-
+ * character error messages were the first strings long enough to
+ * trigger it, and the symptom (one message printing partway and then
+ * seamlessly continuing into the NEXT string's text) looked exactly
+ * like memory corruption until an instruction-level trace showed the
+ * walking pointer doing exactly what the truncated data told it to. */
 void emit_string_literals(void) {
     if (g_nstrlits == 0) return;
     emit("; ---- string literals (raw bytes; __rt_puts converts at print time) ----");
     for (int i = 0; i < g_nstrlits; i++) {
         emit("%s:", g_strlits[i].label);
-        fprintf(g_out, "    .byte ");
-        for (const unsigned char *p = (const unsigned char *)g_strlits[i].content; *p; p++)
-            fprintf(g_out, "%d,", (int)*p);
-        fprintf(g_out, "0\n");
+        const unsigned char *p = (const unsigned char *)g_strlits[i].content;
+        size_t len = strlen(g_strlits[i].content);
+        size_t pos = 0;
+        while (pos <= len) { /* <= so the final chunk includes the 0 terminator */
+            fprintf(g_out, "    .byte ");
+            int inline_count = 0;
+            while (pos <= len && inline_count < 32) {
+                if (inline_count > 0) fprintf(g_out, ",");
+                fprintf(g_out, "%d", pos < len ? (int)p[pos] : 0);
+                pos++;
+                inline_count++;
+            }
+            fprintf(g_out, "\n");
+        }
     }
     emit(" ");
 }
