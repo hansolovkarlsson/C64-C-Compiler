@@ -19,7 +19,6 @@ fi
 SRC="./tests/$1"
 BASE=$(basename "$SRC" .c)
 DIR=$(dirname "$SRC")
-INC="$DIR/inc"
 OUT="${2:-$DIR/$BASE.prg}"
 ASM="$DIR/$BASE.asm"
 
@@ -30,7 +29,7 @@ C64ASM="$SCRIPT_DIR/c64asm"
 [ -x "$C64ASM" ] || C64ASM=c64asm
 
 echo "==> compiling $SRC -> $ASM"
-"$CC64" "$SRC" -o "$ASM" -I "$INC"
+"$CC64" "$SRC" -o "$ASM"
 
 echo "==> assembling $ASM -> $OUT"
 "$C64ASM" "$ASM" -o "$OUT"
